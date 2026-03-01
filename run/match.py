@@ -76,7 +76,7 @@ def main():
     # sides; we use this when the game count is even.
     if args.games % 2 == 0:
         rounds_arg = str(args.games // 2)
-        games_arg  = ["--games", "2", "-repeat"]
+        games_arg  = ["-games", "2", "-repeat"]
     else:
         rounds_arg = str(args.games)
         games_arg  = []
