@@ -12,6 +12,9 @@
 #include "../src/smp.cpp"
 #include "../src/search.cpp"
 #include "../src/score.cpp"
+#if NNUE
+#include "../src/nnue.cpp"
+#endif
 #include "../src/check.cpp"
 #include "../src/book.cpp"
 #include "../src/sort.cpp"

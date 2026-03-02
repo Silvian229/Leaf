@@ -107,6 +107,12 @@ move tree_search::search(position p, int time_limit, int T, game_rec *gr)
 	tdata[ti].n[0].pos.hmove.t = NOMOVE;  // clear the expected best move from the position
 	tdata[ti].init_thread_data(1);         // initialize data for thread
 	tdata[ti].pc[0][0].t = NOMOVE;
+#if NNUE
+	if(nnue_available) {
+	  tdata[ti].n[0].acc.dirty[0] = tdata[ti].n[0].acc.dirty[1] = true;
+	  nnue_init_accumulator(tdata[ti].n[0].acc, p);
+	}
+#endif
       }
       // check TB at root
 #if TABLEBASES
@@ -261,8 +267,14 @@ move tree_search::search(position p, int time_limit, int T, game_rec *gr)
     tdata[ti].n[0].pos = p;               // set the root node of the search
     tdata[ti].n[0].pos.hmove.t = NOMOVE;  // clear the expected best move from the position
     tdata[ti].init_thread_data(ponder);
-    if(!ti) tdata[0].n[0].premove_score = p.score_pos(gr,tdata);
-    if(ti > 0) { 
+#if NNUE
+    if(nnue_available) {
+      tdata[ti].n[0].acc.dirty[0] = tdata[ti].n[0].acc.dirty[1] = true;
+      nnue_init_accumulator(tdata[ti].n[0].acc, p);
+    }
+#endif
+    if(!ti) tdata[0].n[0].premove_score = p.score_pos(gr,tdata NNUE_ACC_NULL);
+    if(ti > 0) {
       tdata[ti].n[0].premove_score = tdata[0].n[0].premove_score;
     }
   }
@@ -815,15 +827,21 @@ void search_node::root_pvs()
    //   -- if it is illegal, skip to next move in list
    // -------------------------------------------------
    next->pos = pos;
+#if NNUE
+   if(nnue_available) next->acc = acc;
+#endif
    if(!next->pos.exec_move(smove, ply)) {
     mcount++;
     continue;
    }
+#if NNUE
+   if(nnue_available) nnue_update_accumulator(next->acc, pos, next->pos, smove);
+#endif
 
    //---------------------------------------------
    // now set this move as the one being worked
    //---------------------------------------------
-   if(THREADS > 1) { 
+   if(THREADS > 1) {
      ts->share_data[ply][tdata->ID].set_active_move(pos.hcode,depth,save_alpha,beta,smove.t);
    }
 
@@ -1251,7 +1269,7 @@ int search_node::pvs(int alpha, int beta, int depth, int in_pv, int move_to_skip
  //---------------------------------------------
  // Generate a pre-move score for the position
  //---------------------------------------------
- if(pos.last.t) premove_score = pos.score_pos(gr,tdata);
+ if(pos.last.t) premove_score = pos.score_pos(gr,tdata NNUE_ACC_ARG);
 
  // ----------------------------------------------------------
  //     Null Move Heuristic
@@ -1280,6 +1298,9 @@ int search_node::pvs(int alpha, int beta, int depth, int in_pv, int move_to_skip
      next->pos.material = -next->pos.material;
      next->premove_score = -premove_score;
      next->pos.fifty = 0;
+#if NNUE
+     if(nnue_available) next->acc = acc;
+#endif
      // clear old downstream checks so they don't trigger threat check
      next->next->pos.check = 0;
      //------------------------------------------------
@@ -1606,15 +1627,21 @@ int search_node::pvs(int alpha, int beta, int depth, int in_pv, int move_to_skip
    //   -- if it is illegal, skip to next move in list
    // -------------------------------------------------
    next->pos = pos;
+#if NNUE
+   if(nnue_available) next->acc = acc;
+#endif
    if(!next->pos.exec_move(smove, ply)) {
     mcount++;
     continue;
    }
+#if NNUE
+   if(nnue_available) nnue_update_accumulator(next->acc, pos, next->pos, smove);
+#endif
 
    //---------------------------------------------
    // now set this move as the one being worked
    //---------------------------------------------
-   if(in_pv && THREADS > 1) { 
+   if(in_pv && THREADS > 1) {
      ts->share_data[ply][tdata->ID].set_active_move(pos.hcode,depth,save_alpha,beta,smove.t);
    }
 
@@ -2090,7 +2117,7 @@ int search_node::qsearch(int alpha, int beta, int qply)
   //     evasions, but not better, so not doing this now
   //--------------------------------------------------------
   if(ply >= MAXD-2 || (pos.check && qply > 0)) 
-    return MAX(MIN(pos.score_pos(gr, tdata),beta),alpha);       
+    return MAX(MIN(pos.score_pos(gr, tdata NNUE_ACC_ARG),beta),alpha);
 
   //---------------------------  
   // On first layer of q-search 
@@ -2141,7 +2168,7 @@ int search_node::qsearch(int alpha, int beta, int qply)
   if(!pos.check) { 
     if(pos.last.t || TRAIN_EVAL) {  // we already have a score if the last was a null move
       // Generate a pre-move score for the position
-      premove_score = pos.score_pos(gr, tdata);
+      premove_score = pos.score_pos(gr, tdata NNUE_ACC_ARG);
     }
     best = premove_score;
     if(best < alpha && alpha < (MATE/2)) { 
@@ -2199,7 +2226,13 @@ int search_node::qsearch(int alpha, int beta, int qply)
     // execute move
     //   -- returns a zero if the move leaves us in check
     next->pos = pos;
-    if(!next->pos.exec_move(smove, ply)) { continue; } 
+#if NNUE
+    if(nnue_available) next->acc = acc;
+#endif
+    if(!next->pos.exec_move(smove, ply)) { continue; }
+#if NNUE
+    if(nnue_available) nnue_update_accumulator(next->acc, pos, next->pos, smove);
+#endif
 
     // Prefetch the hash line for this position so it can be accessed quickly in next node
     __builtin_prefetch((hash_bucket *)(hash_table + (((TAB_SIZE-1)*((next->pos.hcode)&MAX_UINT))/MAX_UINT)));

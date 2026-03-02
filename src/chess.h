@@ -71,6 +71,23 @@ typedef uint64_t h_code;
 
 #include "hash.h"
 
+#if NNUE
+#include "nnue.h"
+// Convenience macros for passing the NNUE accumulator through score_pos call sites.
+//   NNUE_ACC_PARAM : add the optional parameter to the score_pos declaration
+//   NNUE_ACC_ARG   : pass the current search_node's accumulator (use inside search_node methods)
+//   NNUE_ACC_NULL  : pass nullptr  (for call sites without a search_node accumulator)
+#define NNUE_ACC_PARAM , NNUEAccumulator *nnue_acc = nullptr  // declaration (has default)
+#define NNUE_ACC_DEF   , NNUEAccumulator *nnue_acc            // definition  (no default)
+#define NNUE_ACC_ARG   , &acc
+#define NNUE_ACC_NULL  , nullptr
+#else
+#define NNUE_ACC_PARAM
+#define NNUE_ACC_DEF
+#define NNUE_ACC_ARG
+#define NNUE_ACC_NULL
+#endif
+
 struct ts_thread_data;
 struct tree_search;
 struct game_rec;
@@ -181,7 +198,7 @@ struct position {
 
   /* score.cpp */
   //void init_score(int T, tree_search *ts);
-  int score_pos(game_rec *gr, ts_thread_data *tdata);
+  int score_pos(game_rec *gr, ts_thread_data *tdata NNUE_ACC_PARAM);
   int score_pawns(pawn_data *pawn_record);
   int score_king(game_rec *gr, int *wtropism, int *btropism);
   int bishop_mobility(int sqr, int ksq, int *kattacks, pawn_data *pawn_record);
@@ -207,7 +224,10 @@ struct position {
 
 struct search_node {
   position pos;
-  move_list moves; 
+#if NNUE
+  NNUEAccumulator acc;   // NNUE accumulator for this node (parallel to pos)
+#endif
+  move_list moves;
   int best;          // best score in node
   int save_alpha;    // original alpha of node
   int null_hash;     // null hash switch

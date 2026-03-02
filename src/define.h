@@ -53,7 +53,13 @@
 // define a TRAIN_EVAL parameter
 #ifndef TRAIN_EVAL
  #define TRAIN_EVAL 0
-#endif 
+#endif
+
+// NNUE evaluation (Stockfish HalfKAv2-hm compatible)
+// Compile with -D NNUE=1 and place nn-eba324f53044.nnue next to the binary.
+#ifndef NNUE
+ #define NNUE 0
+#endif
 
 // define 64 bit integers and zero values for unsigned long long
 #if MSVC 

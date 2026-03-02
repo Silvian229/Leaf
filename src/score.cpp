@@ -31,8 +31,61 @@ inline int position::pawn_guard(int tsq, int side, pawn_data *pawn_record) {
 // currently based on a number of factors: Open files, king proximity,
 // good/bad bishops, bishop pairs, pawn structure, king safety, etc....
 
-int position::score_pos(game_rec *gr, ts_thread_data *tdata)
+int position::score_pos(game_rec *gr, ts_thread_data *tdata NNUE_ACC_DEF)
 {
+#if NNUE
+   // -------------------------------------------------------------------
+   // NNUE evaluation: bypass classical eval when the net is loaded and
+   // a valid accumulator is provided.
+   // -------------------------------------------------------------------
+   if (nnue_available && nnue_acc) {
+     tdata->eval_count++;
+     // Probe score hash table (same mechanism as classical eval)
+     score_rec *scores_n = score_table + (((SCORE_SIZE-1)*((hcode)&MAX_UINT))/MAX_UINT);
+     if (scores_n->get_key() == hcode && (!TRAIN_EVAL)) {
+       int cached = scores_n->score;
+       if (scores_n->get_key() == hcode) {
+         tdata->shash_count++;
+         qchecks[0] = 0;
+         qchecks[1] = 0;
+         return wtm ? cached : -cached;
+       }
+     }
+     // Refresh any dirty accumulator halves (king moved in this subtree)
+     if (nnue_acc->dirty[WHITE] || nnue_acc->dirty[BLACK])
+       nnue_init_accumulator(*nnue_acc, *this);
+     int pc = 2;  // two kings
+     for (int s = 0; s < 2; s++)
+       for (int pt = PAWN; pt <= QUEEN; pt++)
+         pc += plist[s][pt][0];
+     int score = nnue_evaluate(*nnue_acc, wtm, pc);
+     // qchecks: set to zero when using NNUE (no classical king-safety info)
+     qchecks[0] = 0;
+     qchecks[1] = 0;
+     // knowledge_scale weakening still applies
+     if (gr->knowledge_scale < 100) {
+       int nscore = (gr->knowledge_scale * score) / 100;
+       if (pcode & 1) nscore -= int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       else           nscore += int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       if (pcode & 2) nscore -= int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       else           nscore += int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       if (pcode & 4) nscore -= int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       else           nscore += int(float(score) * (100.0 - float(gr->knowledge_scale)) / 100.0);
+       score = nscore;
+       if (score > 9999)  score = 9999;
+       if (score < -9999) score = -9999;
+     }
+     // Store in score hash table.
+     // Hash convention: white POV.  nnue_evaluate returns stm POV, so convert.
+     int16_t score_w = (int16_t)(wtm ? score : -score);
+     scores_n->qchecks[0] = 0;
+     scores_n->qchecks[1] = 0;
+     scores_n->score = score_w;
+     scores_n->set_key(hcode, score_w, 0, 0);
+     // score is already from side-to-move's POV (nnue_evaluate returns stm POV)
+     return score;
+   }
+#endif
    int score = 0, i, file, rank, sqr;
    int wattacks = 0, battacks = 0, wtropism = 0, btropism = 0;
    int wksq = plist[WHITE][KING][1];

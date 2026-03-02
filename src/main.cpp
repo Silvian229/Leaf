@@ -141,13 +141,28 @@ int main(int argc, char *argv[])
   //----------------------------------
   set_search_param();
   set_hash_size(HASH_SIZE);
-  gen_check_table(); 
+  gen_check_table();
   srand(time(NULL));
 #if TABLEBASES
   init_tb();
-#endif      
+#endif
 
-  // initialize all thread data 
+#if NNUE
+  {
+    char nnue_path[FILENAME_MAX];
+    // Stockfish 17 SFNNv9 default net (HalfKAv2_hm, ~45 MB compressed)
+    // Download from: https://github.com/official-stockfish/networks
+    // Try exec directory first, then current directory
+    snprintf(nnue_path, sizeof(nnue_path), "%s%s", exec_path, "nn-ae6a388e4a1a.nnue");
+    if (!nnue_load(nnue_path)) {
+      nnue_load("nn-ae6a388e4a1a.nnue");
+    }
+    if (nnue_available) write_out("NNUE evaluation loaded.\n");
+    else                write_out("NNUE file not found, using classical evaluation.\n");
+  }
+#endif
+
+  // initialize all thread data
   game.ts.create_thread_data(&game, MAX_THREADS);
   game.ts.initialize_extra_threads();
 
@@ -960,6 +975,13 @@ void parse_command()
   else if(!strcmp(response, "print_psq") && !xboard) { print_psq(); }
   else if(!strcmp(response, "score") && !xboard)
     { game.p_side = game.pos.wtm^1;
+#if NNUE
+      if (nnue_available) {
+        NNUEAccumulator tmp_acc;
+        nnue_init_accumulator(tmp_acc, game.pos);
+        cout << "score = " << game.pos.score_pos(&game, &game.ts.tdata[0], &tmp_acc) << "\n";
+      } else
+#endif
       cout << "score = " << game.pos.score_pos(&game,&game.ts.tdata[0]) << "\n";
       cout << "material = " << game.pos.material << "\n";
       game.p_side = game.pos.wtm; }
