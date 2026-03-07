@@ -43,8 +43,10 @@ STACK_BYTES = (4 +                           # stack hash
                4 +                           # FC2 bias   (int32)
                L2_PADDED)                    # FC2 weights (int8)
 
-TDLEAF_MAGIC   = 0x544D4C46   # "TMLF"
-TDLEAF_VERSION = 1
+TDLEAF_MAGIC    = 0x544D4C46   # "TMLF"
+TDLEAF_VERSION1 = 1
+TDLEAF_VERSION2 = 2
+TDLEAF_SCALE    = 128.0        # v2: file stores w_f32 × TDLEAF_SCALE
 
 # ---------------------------------------------------------------------------
 # vdotq layout converters  (flat vdotq array → natural [o, i] array)
@@ -104,24 +106,72 @@ def read_nnue_fc(path):
 
 def read_tdleaf_fc(path):
     """
-    Read FC layers from a .tdleaf.bin file.  Weights are in vdotq layout;
-    this function converts them to natural layout before returning.
+    Read FC layers from a .tdleaf.bin file.
+
+    v1: biases int32, weights int8 in VDOTQ layout → converted to natural layout.
+        No counts.
+    v2: biases and weights as float32 (stored × TDLEAF_SCALE) in natural layout,
+        followed by uint32 update counts per weight/bias.
+        Rounded to int8/int32 for comparison with .nnue.
     """
-    data = {k: [] for k in ('fc0_bias', 'fc0_w', 'fc1_bias', 'fc1_w', 'fc2_bias', 'fc2_w')}
+    cnt_keys = ('fc0_bias_cnt', 'fc0_w_cnt', 'fc1_bias_cnt', 'fc1_w_cnt',
+                'fc2_bias_cnt', 'fc2_w_cnt')
+    data = {k: [] for k in ('fc0_bias', 'fc0_w', 'fc1_bias', 'fc1_w', 'fc2_bias', 'fc2_w')
+                            + cnt_keys}
+    data['_has_counts'] = False
+
     with open(path, 'rb') as f:
         magic, version = struct.unpack('<II', f.read(8))
         if magic != TDLEAF_MAGIC:
             sys.exit(f"Error: bad magic {magic:#010x} in {path}")
 
-        for _ in range(N_STACKS):
-            data['fc0_bias'].append(np.frombuffer(f.read(L0_SIZE * 4),       dtype=np.int32).copy())
-            fc0_vdotq = np.frombuffer(f.read(L0_SIZE * L0_INPUT), dtype=np.int8).copy()
-            data['fc0_w'   ].append(vdotq_to_natural_fc0(fc0_vdotq))
-            data['fc1_bias'].append(np.frombuffer(f.read(L1_SIZE * 4),       dtype=np.int32).copy())
-            fc1_vdotq = np.frombuffer(f.read(L1_SIZE * L1_PADDED), dtype=np.int8).copy()
-            data['fc1_w'   ].append(vdotq_to_natural_fc1(fc1_vdotq))
-            data['fc2_bias'].append(np.frombuffer(f.read(4),                 dtype=np.int32).copy())
-            data['fc2_w'   ].append(np.frombuffer(f.read(L2_PADDED),         dtype=np.int8 ).copy())
+        if version == TDLEAF_VERSION2:
+            data['_has_counts'] = True
+            for _ in range(N_STACKS):
+                def rf(n, fh=f):
+                    raw = np.frombuffer(fh.read(n * 4), dtype=np.float32).copy()
+                    return raw / TDLEAF_SCALE
+                def ru(n, fh=f):
+                    return np.frombuffer(fh.read(n * 4), dtype=np.uint32).copy()
+
+                b0 = rf(L0_SIZE)
+                data['fc0_bias'    ].append(np.round(b0).astype(np.int32))
+                data['fc0_bias_cnt'].append(ru(L0_SIZE))
+
+                w0 = rf(L0_SIZE * L0_INPUT).reshape(L0_SIZE, L0_INPUT)
+                data['fc0_w'    ].append(np.clip(np.round(w0), -128, 127).astype(np.int8))
+                data['fc0_w_cnt'].append(ru(L0_SIZE * L0_INPUT).reshape(L0_SIZE, L0_INPUT))
+
+                b1 = rf(L1_SIZE)
+                data['fc1_bias'    ].append(np.round(b1).astype(np.int32))
+                data['fc1_bias_cnt'].append(ru(L1_SIZE))
+
+                w1 = rf(L1_SIZE * L1_PADDED).reshape(L1_SIZE, L1_PADDED)
+                data['fc1_w'    ].append(np.clip(np.round(w1), -128, 127).astype(np.int8))
+                data['fc1_w_cnt'].append(ru(L1_SIZE * L1_PADDED).reshape(L1_SIZE, L1_PADDED))
+
+                b2 = rf(1)
+                data['fc2_bias'    ].append(np.round(b2).astype(np.int32))
+                data['fc2_bias_cnt'].append(ru(1))
+
+                w2 = rf(L2_PADDED)
+                data['fc2_w'    ].append(np.clip(np.round(w2), -128, 127).astype(np.int8))
+                data['fc2_w_cnt'].append(ru(L2_PADDED))
+
+        elif version == TDLEAF_VERSION1:
+            for _ in range(N_STACKS):
+                data['fc0_bias'].append(np.frombuffer(f.read(L0_SIZE * 4),        dtype=np.int32).copy())
+                fc0_vdotq = np.frombuffer(f.read(L0_SIZE * L0_INPUT), dtype=np.int8).copy()
+                data['fc0_w'   ].append(vdotq_to_natural_fc0(fc0_vdotq))
+                data['fc1_bias'].append(np.frombuffer(f.read(L1_SIZE * 4),        dtype=np.int32).copy())
+                fc1_vdotq = np.frombuffer(f.read(L1_SIZE * L1_PADDED), dtype=np.int8).copy()
+                data['fc1_w'   ].append(vdotq_to_natural_fc1(fc1_vdotq))
+                data['fc2_bias'].append(np.frombuffer(f.read(4),                  dtype=np.int32).copy())
+                data['fc2_w'   ].append(np.frombuffer(f.read(L2_PADDED),          dtype=np.int8 ).copy())
+            # no counts for v1
+        else:
+            sys.exit(f"Error: unknown .tdleaf.bin version {version} in {path}")
+
     return data
 
 # ---------------------------------------------------------------------------
@@ -156,6 +206,8 @@ def bias_delta_stats(orig, upd):
 # ---------------------------------------------------------------------------
 
 def print_summary(orig, upd):
+    has_counts = upd.get('_has_counts', False)
+
     print("\n┌─────────────────────────────────────────────────────────────────────────┐")
     print("│              Weight change summary (all stacks combined)               │")
     print("├──────────┬──────────────┬───────────────┬───────────┬─────────────────┤")
@@ -189,6 +241,25 @@ def print_summary(orig, upd):
         st = delta_stats(orig['fc1_w'][s], upd['fc1_w'][s])
         print(f"  Stack {s}  {st['n_changed']:>6}/{st['n']:<4} {st['pct']:>7.2f}%"
               f"  {st['dmin']:>6}  {st['dmax']:>6}  {abs(st['dmean']):>9.3f}")
+
+    # Update count summary (v2 only)
+    if has_counts:
+        print("\nUpdate count summary (v2 — times each weight was updated across sessions):")
+        print(f"  {'Layer':<10} {'Total wts':>10} {'Ever updated':>14} {'Max cnt':>9} {'Mean cnt (>0)':>14}")
+        for layer_name, key_w, key_b in [
+                ('FC0 wts',  'fc0_w_cnt',   'fc0_bias_cnt'),
+                ('FC1 wts',  'fc1_w_cnt',   'fc1_bias_cnt'),
+                ('FC2 wts',  'fc2_w_cnt',   'fc2_bias_cnt'),
+        ]:
+            wc = np.concatenate(upd[key_w]).ravel()
+            nz = wc[wc > 0]
+            print(f"  {layer_name:<10} {wc.size:>10} {len(nz):>14} {int(wc.max()):>9}"
+                  f" {(nz.mean() if len(nz) else 0.0):>14.2f}")
+            bc = np.concatenate(upd[key_b]).ravel()
+            bnz = bc[bc > 0]
+            label = layer_name[:-3] + 'bis'
+            print(f"  {label:<10} {bc.size:>10} {len(bnz):>14} {int(bc.max()):>9}"
+                  f" {(bnz.mean() if len(bnz) else 0.0):>14.2f}")
 
 # ---------------------------------------------------------------------------
 # Plotting

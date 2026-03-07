@@ -23,10 +23,14 @@
 // ---------------------------------------------------------------------------
 // Hyperparameters (can be overridden by setvalue/environment at runtime)
 // ---------------------------------------------------------------------------
-static const float TDLEAF_LAMBDA    = 0.7f;   // eligibility trace decay
-static const float TDLEAF_ALPHA     = 200.0f; // learning rate (raw-int-scale weights)
-static const float TDLEAF_K         = 400.0f; // sigmoid temperature (centipawns)
-static const int   TDLEAF_MIN_PLIES = 8;      // skip games shorter than this
+static const float TDLEAF_LAMBDA          = 0.7f;   // eligibility trace decay
+static const float TDLEAF_ALPHA           = 200.0f; // learning rate (raw-int-scale weights)
+static const float TDLEAF_K               = 400.0f; // sigmoid temperature (centipawns)
+static const int   TDLEAF_MIN_PLIES       = 8;      // skip games shorter than this
+// Per-update clamp: a single game's gradient update is limited to at most this
+// fraction of the weight's current magnitude (min ref = 1.0 so near-zero weights
+// can still move).  Set to 1.0 to disable.
+static const float TDLEAF_MAX_UPDATE_FRAC = 0.10f;  // max 10% change per update
 
 // ---------------------------------------------------------------------------
 // Per-ply record: accumulator snapshot + search score

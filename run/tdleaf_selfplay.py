@@ -239,9 +239,11 @@ def main():
             pass
 
     send(e1, 'xboard', args.verbose, 'E1>>>')
+    send(e1, 'easy', args.verbose, 'E1>>>')        # turn off pondering
     send(e1, 'nopost',  args.verbose, 'E1>>>')
     if two_engine:
         send(e2, 'xboard', args.verbose, 'E2>>>')
+        send(e2, 'easy', args.verbose, 'E2>>>')    # turn off pondering
         send(e2, 'nopost',  args.verbose, 'E2>>>')
     drain(q, timeout=0.2)
 
@@ -251,8 +253,8 @@ def main():
     wins = draws = losses = 0   # always from engine 1's perspective
     td_plies_list = []
     start_wall    = time.monotonic()
-    tc1_int = max(1, round(args.tc))
-    tc2_int = max(1, round(tc2))
+    tc1_int = min(max(1, round(args.tc)),9)
+    tc2_int = min(max(1, round(tc2)),9)
 
     for game_num in range(1, args.games + 1):
 
@@ -271,14 +273,14 @@ def main():
 
         # Setup engine 1
         send(e1, 'new',          args.verbose, 'E1>>>')
-        send(e1, f'st {tc1_int}', args.verbose, 'E1>>>')
+        send(e1, f'level 0 0:0{tc1_int} 0.05', args.verbose, 'E1>>>')
         if args.depth:
             send(e1, f'sd {args.depth}', args.verbose, 'E1>>>')
 
         # Setup engine 2 (if present)
         if two_engine:
             send(e2, 'new',          args.verbose, 'E2>>>')
-            send(e2, f'st {tc2_int}', args.verbose, 'E2>>>')
+            send(e2, f'level 0 0:0{tc2_int} 0.05', args.verbose, 'E2>>>')
             if depth2:
                 send(e2, f'sd {depth2}', args.verbose, 'E2>>>')
 

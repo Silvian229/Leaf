@@ -877,6 +877,15 @@ static float l1_biases_f32 [NNUE_LAYER_STACKS][NNUE_L1_SIZE];
 static float l2_weights_f32[NNUE_LAYER_STACKS][NNUE_L2_PADDED];
 static float l2_bias_f32   [NNUE_LAYER_STACKS];
 
+// Update counts — per weight/bias, incremented each game a non-zero gradient was applied.
+// Saved to / loaded from .tdleaf.bin so training history accumulates across sessions.
+static uint32_t l0_weights_cnt[NNUE_LAYER_STACKS][NNUE_L0_SIZE * NNUE_L0_INPUT];
+static uint32_t l0_biases_cnt [NNUE_LAYER_STACKS][NNUE_L0_SIZE];
+static uint32_t l1_weights_cnt[NNUE_LAYER_STACKS][NNUE_L1_SIZE * NNUE_L1_PADDED];
+static uint32_t l1_biases_cnt [NNUE_LAYER_STACKS][NNUE_L1_SIZE];
+static uint32_t l2_weights_cnt[NNUE_LAYER_STACKS][NNUE_L2_PADDED];
+static uint32_t l2_bias_cnt   [NNUE_LAYER_STACKS];
+
 // Gradient accumulators (zeroed before each game, filled by nnue_accumulate_gradients)
 static float grad_l0_w[NNUE_LAYER_STACKS][NNUE_L0_SIZE * NNUE_L0_INPUT];
 static float grad_l0_b[NNUE_LAYER_STACKS][NNUE_L0_SIZE];
@@ -921,6 +930,12 @@ void nnue_init_fp32_weights()
         for (int i = 0; i < NNUE_L2_PADDED; i++)
             l2_weights_f32[s][i] = (float)out_weights[s][i];
     }
+    memset(l0_weights_cnt, 0, sizeof(l0_weights_cnt));
+    memset(l0_biases_cnt,  0, sizeof(l0_biases_cnt));
+    memset(l1_weights_cnt, 0, sizeof(l1_weights_cnt));
+    memset(l1_biases_cnt,  0, sizeof(l1_biases_cnt));
+    memset(l2_weights_cnt, 0, sizeof(l2_weights_cnt));
+    memset(l2_bias_cnt,    0, sizeof(l2_bias_cnt));
     memset(grad_l0_w, 0, sizeof(grad_l0_w));
     memset(grad_l0_b, 0, sizeof(grad_l0_b));
     memset(grad_l1_w, 0, sizeof(grad_l1_w));
@@ -1083,22 +1098,57 @@ void nnue_accumulate_gradients(const NNUEActivations &act, float grad_scale)
 }
 
 // ---------------------------------------------------------------------------
-// nnue_apply_gradients — update FP32 weights from accumulators, then zero them
+// nnue_apply_gradients — update FP32 weights from accumulators, increment counts,
+//                        then zero the accumulators.
+// Only weights that received a non-zero gradient this game are updated / counted.
+// Each update is clamped to ±TDLEAF_MAX_UPDATE_FRAC × max(|w|, 1.0) so no single
+// game can move any weight by more than that fraction of its current magnitude.
 // ---------------------------------------------------------------------------
 void nnue_apply_gradients()
 {
+    // Clamp gradient magnitude to TDLEAF_MAX_UPDATE_FRAC × max(|w|, 1).
+    auto clamp_grad = [](float w, float g) -> float {
+        float max_delta = TDLEAF_MAX_UPDATE_FRAC * fmaxf(fabsf(w), 1.0f);
+        if      (g >  max_delta) return  max_delta;
+        else if (g < -max_delta) return -max_delta;
+        return g;
+    };
+
     for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
-        for (int i = 0; i < NNUE_L0_SIZE * NNUE_L0_INPUT; i++)
-            l0_weights_f32[s][i] -= grad_l0_w[s][i];
-        for (int i = 0; i < NNUE_L0_SIZE; i++)
-            l0_biases_f32[s][i] -= grad_l0_b[s][i];
-        for (int i = 0; i < NNUE_L1_SIZE * NNUE_L1_PADDED; i++)
-            l1_weights_f32[s][i] -= grad_l1_w[s][i];
-        for (int i = 0; i < NNUE_L1_SIZE; i++)
-            l1_biases_f32[s][i] -= grad_l1_b[s][i];
-        for (int i = 0; i < NNUE_L2_PADDED; i++)
-            l2_weights_f32[s][i] -= grad_l2_w[s][i];
-        l2_bias_f32[s] -= grad_l2_b[s];
+        for (int i = 0; i < NNUE_L0_SIZE * NNUE_L0_INPUT; i++) {
+            if (grad_l0_w[s][i] != 0.0f) {
+                l0_weights_f32[s][i] -= clamp_grad(l0_weights_f32[s][i], grad_l0_w[s][i]);
+                l0_weights_cnt[s][i]++;
+            }
+        }
+        for (int i = 0; i < NNUE_L0_SIZE; i++) {
+            if (grad_l0_b[s][i] != 0.0f) {
+                l0_biases_f32[s][i] -= clamp_grad(l0_biases_f32[s][i], grad_l0_b[s][i]);
+                l0_biases_cnt[s][i]++;
+            }
+        }
+        for (int i = 0; i < NNUE_L1_SIZE * NNUE_L1_PADDED; i++) {
+            if (grad_l1_w[s][i] != 0.0f) {
+                l1_weights_f32[s][i] -= clamp_grad(l1_weights_f32[s][i], grad_l1_w[s][i]);
+                l1_weights_cnt[s][i]++;
+            }
+        }
+        for (int i = 0; i < NNUE_L1_SIZE; i++) {
+            if (grad_l1_b[s][i] != 0.0f) {
+                l1_biases_f32[s][i] -= clamp_grad(l1_biases_f32[s][i], grad_l1_b[s][i]);
+                l1_biases_cnt[s][i]++;
+            }
+        }
+        for (int i = 0; i < NNUE_L2_PADDED; i++) {
+            if (grad_l2_w[s][i] != 0.0f) {
+                l2_weights_f32[s][i] -= clamp_grad(l2_weights_f32[s][i], grad_l2_w[s][i]);
+                l2_weights_cnt[s][i]++;
+            }
+        }
+        if (grad_l2_b[s] != 0.0f) {
+            l2_bias_f32[s] -= clamp_grad(l2_bias_f32[s], grad_l2_b[s]);
+            l2_bias_cnt[s]++;
+        }
     }
     memset(grad_l0_w, 0, sizeof(grad_l0_w));
     memset(grad_l0_b, 0, sizeof(grad_l0_b));
@@ -1159,11 +1209,34 @@ void nnue_requantize_fc()
 
 // ---------------------------------------------------------------------------
 // nnue_save_fc_weights / nnue_load_fc_weights — companion .tdleaf.bin file
-// File layout: magic(4) + version(4) + 8 stacks × [FC0_b + FC0_w + FC1_b +
-//              FC1_w + FC2_b + FC2_w]  all in int32/int8 as used by inference.
+//
+// Version 2 layout (current):
+//   magic(4) + version(4) + 8 stacks × per-stack block
+//   Per-stack block:
+//     FC0 biases:  float32[L0_SIZE]            × TDLEAF_SCALE  (64 B)
+//                  uint32_t counts[L0_SIZE]                     (64 B)
+//     FC0 weights: float32[L0_SIZE*L0_INPUT]   × TDLEAF_SCALE  (65536 B, natural layout)
+//                  uint32_t counts[L0_SIZE*L0_INPUT]            (65536 B)
+//     FC1 biases:  float32[L1_SIZE]            × TDLEAF_SCALE  (128 B)
+//                  uint32_t counts[L1_SIZE]                     (128 B)
+//     FC1 weights: float32[L1_SIZE*L1_PADDED]  × TDLEAF_SCALE  (4096 B, natural layout)
+//                  uint32_t counts[L1_SIZE*L1_PADDED]           (4096 B)
+//     FC2 bias:    float32[1]                  × TDLEAF_SCALE  (4 B)
+//                  uint32_t count[1]                            (4 B)
+//     FC2 weights: float32[L2_PADDED]          × TDLEAF_SCALE  (128 B)
+//                  uint32_t counts[L2_PADDED]                   (128 B)
+//   Total: 8 + 8 × 139,912 = 1,119,304 bytes
+//
+// TDLEAF_SCALE = 128: in-memory w_f32 is at 1× int8 scale; the file stores w×128
+// so that sub-0.5 fractional drifts are preserved across sessions.  When loading,
+// divide by TDLEAF_SCALE to restore w_f32 exactly.  nnue_requantize_fc then derives
+// the int8 inference values via round(w_f32).
+//
+// Version 1 (legacy): int32 biases + int8 weights, no counts.  Still readable.
 // ---------------------------------------------------------------------------
+static const float    TDLEAF_SCALE   = 128.0f;
 static const uint32_t TDLEAF_MAGIC   = 0x544D4C46u; // "TMLF"
-static const uint32_t TDLEAF_VERSION = 1u;
+static const uint32_t TDLEAF_VERSION = 2u;
 
 bool nnue_save_fc_weights(const char *path)
 {
@@ -1172,12 +1245,39 @@ bool nnue_save_fc_weights(const char *path)
     fwrite(&TDLEAF_MAGIC,   4, 1, f);
     fwrite(&TDLEAF_VERSION, 4, 1, f);
     for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
-        fwrite(l0_biases[s],  sizeof(int32_t), NNUE_L0_SIZE,                f);
-        fwrite(l0_weights[s], sizeof(int8_t),  NNUE_L0_SIZE * NNUE_L0_INPUT, f);
-        fwrite(l1_biases[s],  sizeof(int32_t), NNUE_L1_SIZE,                f);
-        fwrite(l1_weights[s], sizeof(int8_t),  NNUE_L1_SIZE * NNUE_L1_PADDED, f);
-        fwrite(&out_biases[s],  sizeof(int32_t), 1,              f);
-        fwrite(out_weights[s],  sizeof(int8_t),  NNUE_L2_PADDED, f);
+        // FC0 biases
+        for (int i = 0; i < NNUE_L0_SIZE; i++) {
+            float v = l0_biases_f32[s][i] * TDLEAF_SCALE;
+            fwrite(&v, sizeof(float), 1, f);
+        }
+        fwrite(l0_biases_cnt[s], sizeof(uint32_t), NNUE_L0_SIZE, f);
+        // FC0 weights (natural output-major layout: o * L0_INPUT + i)
+        for (int i = 0; i < NNUE_L0_SIZE * NNUE_L0_INPUT; i++) {
+            float v = l0_weights_f32[s][i] * TDLEAF_SCALE;
+            fwrite(&v, sizeof(float), 1, f);
+        }
+        fwrite(l0_weights_cnt[s], sizeof(uint32_t), NNUE_L0_SIZE * NNUE_L0_INPUT, f);
+        // FC1 biases
+        for (int i = 0; i < NNUE_L1_SIZE; i++) {
+            float v = l1_biases_f32[s][i] * TDLEAF_SCALE;
+            fwrite(&v, sizeof(float), 1, f);
+        }
+        fwrite(l1_biases_cnt[s], sizeof(uint32_t), NNUE_L1_SIZE, f);
+        // FC1 weights (natural output-major layout: o * L1_PADDED + i)
+        for (int i = 0; i < NNUE_L1_SIZE * NNUE_L1_PADDED; i++) {
+            float v = l1_weights_f32[s][i] * TDLEAF_SCALE;
+            fwrite(&v, sizeof(float), 1, f);
+        }
+        fwrite(l1_weights_cnt[s], sizeof(uint32_t), NNUE_L1_SIZE * NNUE_L1_PADDED, f);
+        // FC2 bias
+        { float v = l2_bias_f32[s] * TDLEAF_SCALE; fwrite(&v, sizeof(float), 1, f); }
+        fwrite(&l2_bias_cnt[s], sizeof(uint32_t), 1, f);
+        // FC2 weights
+        for (int i = 0; i < NNUE_L2_PADDED; i++) {
+            float v = l2_weights_f32[s][i] * TDLEAF_SCALE;
+            fwrite(&v, sizeof(float), 1, f);
+        }
+        fwrite(l2_weights_cnt[s], sizeof(uint32_t), NNUE_L2_PADDED, f);
     }
     fclose(f);
     return true;
@@ -1188,29 +1288,83 @@ bool nnue_load_fc_weights(const char *path)
     FILE *f = fopen(path, "rb");
     if (!f) return false;
     uint32_t magic = 0, version = 0;
-    fread(&magic,   4, 1, f);
-    fread(&version, 4, 1, f);
-    if (magic != TDLEAF_MAGIC || version != TDLEAF_VERSION) {
-        fprintf(stderr, "TDLeaf: bad magic/version in %s\n", path);
+    if (fread(&magic, 4, 1, f) != 1 || fread(&version, 4, 1, f) != 1) {
         fclose(f); return false;
     }
-    for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
-        if (fread(l0_biases[s],  sizeof(int32_t), NNUE_L0_SIZE, f) != (size_t)NNUE_L0_SIZE ||
-            fread(l0_weights[s], sizeof(int8_t),  NNUE_L0_SIZE * NNUE_L0_INPUT, f)
-                != (size_t)(NNUE_L0_SIZE * NNUE_L0_INPUT) ||
-            fread(l1_biases[s],  sizeof(int32_t), NNUE_L1_SIZE, f) != (size_t)NNUE_L1_SIZE ||
-            fread(l1_weights[s], sizeof(int8_t),  NNUE_L1_SIZE * NNUE_L1_PADDED, f)
-                != (size_t)(NNUE_L1_SIZE * NNUE_L1_PADDED) ||
-            fread(&out_biases[s],  sizeof(int32_t), 1, f) != 1 ||
-            fread(out_weights[s],  sizeof(int8_t),  NNUE_L2_PADDED, f) != (size_t)NNUE_L2_PADDED) {
-            fprintf(stderr, "TDLeaf: read error in %s (stack %d)\n", path, s);
-            fclose(f); return false;
+    if (magic != TDLEAF_MAGIC) {
+        fprintf(stderr, "TDLeaf: bad magic in %s\n", path);
+        fclose(f); return false;
+    }
+
+    // ---- Version 1: legacy int8/int32 format, no counts ----
+    if (version == 1) {
+        for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
+            if (fread(l0_biases[s],  sizeof(int32_t), NNUE_L0_SIZE, f) != (size_t)NNUE_L0_SIZE ||
+                fread(l0_weights[s], sizeof(int8_t),  NNUE_L0_SIZE * NNUE_L0_INPUT, f)
+                    != (size_t)(NNUE_L0_SIZE * NNUE_L0_INPUT) ||
+                fread(l1_biases[s],  sizeof(int32_t), NNUE_L1_SIZE, f) != (size_t)NNUE_L1_SIZE ||
+                fread(l1_weights[s], sizeof(int8_t),  NNUE_L1_SIZE * NNUE_L1_PADDED, f)
+                    != (size_t)(NNUE_L1_SIZE * NNUE_L1_PADDED) ||
+                fread(&out_biases[s],  sizeof(int32_t), 1, f) != 1 ||
+                fread(out_weights[s],  sizeof(int8_t),  NNUE_L2_PADDED, f) != (size_t)NNUE_L2_PADDED) {
+                fprintf(stderr, "TDLeaf: read error in %s (stack %d)\n", path, s);
+                fclose(f); return false;
+            }
         }
+        fclose(f);
+        // Sync FP32 copies and zero counts (v1 has no count data).
+        nnue_init_fp32_weights();
+        printf("TDLeaf: loaded v1 FC weights from %s (will upgrade to v2 on next save)\n", path);
+        return true;
+    }
+
+    // ---- Version 2: float32 × TDLEAF_SCALE + uint32 counts ----
+    if (version != TDLEAF_VERSION) {
+        fprintf(stderr, "TDLeaf: unsupported version %u in %s\n", version, path);
+        fclose(f); return false;
+    }
+    bool ok = true;
+    for (int s = 0; s < NNUE_LAYER_STACKS && ok; s++) {
+        // Helper: read N float32 values, divide by TDLEAF_SCALE, store into dst.
+        auto rf = [&](float *dst, int n) -> bool {
+            for (int i = 0; i < n; i++) {
+                float v;
+                if (fread(&v, sizeof(float), 1, f) != 1) return false;
+                dst[i] = v / TDLEAF_SCALE;
+            }
+            return true;
+        };
+        // Helper: read N uint32 values into dst.
+        auto ru = [&](uint32_t *dst, int n) -> bool {
+            return fread(dst, sizeof(uint32_t), n, f) == (size_t)n;
+        };
+        ok = rf(l0_biases_f32[s],  NNUE_L0_SIZE)                  &&
+             ru(l0_biases_cnt[s],  NNUE_L0_SIZE)                  &&
+             rf(l0_weights_f32[s], NNUE_L0_SIZE * NNUE_L0_INPUT)  &&
+             ru(l0_weights_cnt[s], NNUE_L0_SIZE * NNUE_L0_INPUT)  &&
+             rf(l1_biases_f32[s],  NNUE_L1_SIZE)                  &&
+             ru(l1_biases_cnt[s],  NNUE_L1_SIZE)                  &&
+             rf(l1_weights_f32[s], NNUE_L1_SIZE * NNUE_L1_PADDED) &&
+             ru(l1_weights_cnt[s], NNUE_L1_SIZE * NNUE_L1_PADDED) &&
+             rf(&l2_bias_f32[s],   1)                             &&
+             ru(&l2_bias_cnt[s],   1)                             &&
+             rf(l2_weights_f32[s], NNUE_L2_PADDED)                &&
+             ru(l2_weights_cnt[s], NNUE_L2_PADDED);
     }
     fclose(f);
-    // Sync FP32 copies from the newly loaded int8 arrays.
-    nnue_init_fp32_weights();
-    printf("TDLeaf: loaded FC weights from %s\n", path);
+    if (!ok) {
+        fprintf(stderr, "TDLeaf: read error in %s\n", path);
+        return false;
+    }
+    // Zero gradient accumulators; requantize fp32 → int8 for inference.
+    memset(grad_l0_w, 0, sizeof(grad_l0_w));
+    memset(grad_l0_b, 0, sizeof(grad_l0_b));
+    memset(grad_l1_w, 0, sizeof(grad_l1_w));
+    memset(grad_l1_b, 0, sizeof(grad_l1_b));
+    memset(grad_l2_w, 0, sizeof(grad_l2_w));
+    memset(grad_l2_b, 0, sizeof(grad_l2_b));
+    nnue_requantize_fc();
+    printf("TDLeaf: loaded v2 FC weights from %s\n", path);
     return true;
 }
 
