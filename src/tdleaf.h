@@ -24,7 +24,7 @@
 // Hyperparameters (can be overridden by setvalue/environment at runtime)
 // ---------------------------------------------------------------------------
 static const float TDLEAF_LAMBDA    = 0.7f;   // eligibility trace decay
-static const float TDLEAF_ALPHA     = 1e-5f;  // learning rate
+static const float TDLEAF_ALPHA     = 200.0f; // learning rate (raw-int-scale weights)
 static const float TDLEAF_K         = 400.0f; // sigmoid temperature (centipawns)
 static const int   TDLEAF_MIN_PLIES = 8;      // skip games shorter than this
 

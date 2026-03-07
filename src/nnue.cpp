@@ -890,33 +890,36 @@ static float grad_l2_b[NNUE_LAYER_STACKS];
 // ---------------------------------------------------------------------------
 void nnue_init_fp32_weights()
 {
-    const float q_scale = 1.0f / (float)(1 << NNUE_WEIGHT_SHIFT); // 1/64
-
+    // Store weights at raw int8/int32 scale (no q_scale division).
+    // The float forward pass uses the same arithmetic as the int path:
+    //   fc_raw = bias_int32 + sum(w_int8 * input_[0,127])
+    //   activation = clamp(fc_raw / 64, 0, 127)   (CReLU / SqrCReLU)
+    // Requantisation is then just round(clamp(w_f32, -127, 127)).
     for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
         // FC0: vdotq layout → natural [o * L0_INPUT + i]
         for (int o = 0; o < NNUE_L0_SIZE; o++) {
             int ob = o / 4, k = o % 4;
-            l0_biases_f32[s][o] = (float)l0_biases[s][o] * q_scale * q_scale;
+            l0_biases_f32[s][o] = (float)l0_biases[s][o];
             for (int i = 0; i < NNUE_L0_INPUT; i++) {
                 int ib = i / 4, j = i % 4;
                 l0_weights_f32[s][o * NNUE_L0_INPUT + i] =
-                    (float)l0_weights[s][ib * 64 + ob * 16 + k * 4 + j] * q_scale;
+                    (float)l0_weights[s][ib * 64 + ob * 16 + k * 4 + j];
             }
         }
         // FC1: vdotq layout → natural [o * PADDED + i]
         for (int o = 0; o < NNUE_L1_SIZE; o++) {
             int ob = o / 4, k = o % 4;
-            l1_biases_f32[s][o] = (float)l1_biases[s][o] * q_scale * q_scale;
+            l1_biases_f32[s][o] = (float)l1_biases[s][o];
             for (int i = 0; i < NNUE_L1_PADDED; i++) {
                 int ib = i / 4, j = i % 4;
                 l1_weights_f32[s][o * NNUE_L1_PADDED + i] =
-                    (float)l1_weights[s][ib * 128 + ob * 16 + k * 4 + j] * q_scale;
+                    (float)l1_weights[s][ib * 128 + ob * 16 + k * 4 + j];
             }
         }
         // FC2: natural layout (32 weights, 1 output)
-        l2_bias_f32[s] = (float)out_biases[s] * q_scale * q_scale;
+        l2_bias_f32[s] = (float)out_biases[s];
         for (int i = 0; i < NNUE_L2_PADDED; i++)
-            l2_weights_f32[s][i] = (float)out_weights[s][i] * q_scale;
+            l2_weights_f32[s][i] = (float)out_weights[s][i];
     }
     memset(grad_l0_w, 0, sizeof(grad_l0_w));
     memset(grad_l0_b, 0, sizeof(grad_l0_b));
@@ -1110,19 +1113,18 @@ void nnue_apply_gradients()
 // ---------------------------------------------------------------------------
 void nnue_requantize_fc()
 {
-    const float q_scale = (float)(1 << NNUE_WEIGHT_SHIFT); // 64
-    const float b_scale = q_scale * q_scale;                // 4096 (bias quantization)
-
+    // Weights are stored at raw int8/int32 scale, so requantise by simply
+    // rounding — no multiplication by q_scale or b_scale needed.
     for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
         // FC0 weights: natural → vdotq layout
         for (int o = 0; o < NNUE_L0_SIZE; o++) {
             int ob = o / 4, k = o % 4;
-            int bq = (int)roundf(l0_biases_f32[s][o] * b_scale);
-            l0_biases[s][o] = (bq < -2147483647) ? -2147483647 :
-                              (bq >  2147483647) ?  2147483647 : bq;
+            int64_t bq = (int64_t)roundf(l0_biases_f32[s][o]);
+            l0_biases[s][o] = (int32_t)((bq < -2147483647) ? -2147483647 :
+                                         (bq >  2147483647) ?  2147483647 : bq);
             for (int i = 0; i < NNUE_L0_INPUT; i++) {
                 int ib = i / 4, j = i % 4;
-                int q = (int)roundf(l0_weights_f32[s][o * NNUE_L0_INPUT + i] * q_scale);
+                int q = (int)roundf(l0_weights_f32[s][o * NNUE_L0_INPUT + i]);
                 if (q < -127) q = -127; if (q > 127) q = 127;
                 l0_weights[s][ib * 64 + ob * 16 + k * 4 + j] = (int8_t)q;
             }
@@ -1130,22 +1132,22 @@ void nnue_requantize_fc()
         // FC1 weights: natural → vdotq layout
         for (int o = 0; o < NNUE_L1_SIZE; o++) {
             int ob = o / 4, k = o % 4;
-            int bq = (int)roundf(l1_biases_f32[s][o] * b_scale);
-            l1_biases[s][o] = (bq < -2147483647) ? -2147483647 :
-                              (bq >  2147483647) ?  2147483647 : bq;
+            int64_t bq = (int64_t)roundf(l1_biases_f32[s][o]);
+            l1_biases[s][o] = (int32_t)((bq < -2147483647) ? -2147483647 :
+                                          (bq >  2147483647) ?  2147483647 : bq);
             for (int i = 0; i < NNUE_L1_PADDED; i++) {
                 int ib = i / 4, j = i % 4;
-                int q = (int)roundf(l1_weights_f32[s][o * NNUE_L1_PADDED + i] * q_scale);
+                int q = (int)roundf(l1_weights_f32[s][o * NNUE_L1_PADDED + i]);
                 if (q < -127) q = -127; if (q > 127) q = 127;
                 l1_weights[s][ib * 128 + ob * 16 + k * 4 + j] = (int8_t)q;
             }
         }
         // FC2 weights: natural layout (no reorder needed)
-        int bq = (int)roundf(l2_bias_f32[s] * b_scale);
-        out_biases[s] = (bq < -2147483647) ? -2147483647 :
-                        (bq >  2147483647) ?  2147483647 : bq;
+        int64_t bq = (int64_t)roundf(l2_bias_f32[s]);
+        out_biases[s] = (int32_t)((bq < -2147483647) ? -2147483647 :
+                                   (bq >  2147483647) ?  2147483647 : bq);
         for (int i = 0; i < NNUE_L2_PADDED; i++) {
-            int q = (int)roundf(l2_weights_f32[s][i] * q_scale);
+            int q = (int)roundf(l2_weights_f32[s][i]);
             if (q < -127) q = -127; if (q > 127) q = 127;
             out_weights[s][i] = (int8_t)q;
         }

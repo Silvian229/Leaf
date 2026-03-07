@@ -485,7 +485,7 @@ void make_move()
      //---------------------------
      game.best = game.ts.search(game.pos, time_limit, game.T, &game);
      assert(!game.searching);
-#if TDLEAF && NNUE
+#if TDLEAF && NNUE && !TDLEAF_READONLY
      if (nnue_available) {
        int pc = 2;
        for (int _s = 0; _s < 2; _s++)
@@ -597,6 +597,10 @@ void make_move()
 	 snprintf(game.overstring, sizeof(game.overstring), "1/2-1/2 {Stalemate}");
 	 write_out(game.overstring);
       }
+      // Flush stdout before TDLeaf writes to stderr; without this the result
+      // line stays in the stdout pipe buffer while the stderr TDLeaf message
+      // is already visible to the driving script, causing it to miss the message.
+      if (game.over) cout.flush();
 
       game.game_history[game.T-1] = game.best; // record the move in the history list
       // update position list for all threads
@@ -615,7 +619,7 @@ void make_move()
    // update the quasi-legal moves in this situation
    game.pos.allmoves(&game.movelist, &game.ts.tdata[0]);
 
-#if TDLEAF && NNUE
+#if TDLEAF && NNUE && !TDLEAF_READONLY
    // If the game just ended via checkmate/stalemate/draw, trigger TDLeaf update.
    if (game.over && nnue_available && game.td_game.n_plies > 0) {
      float td_result = 0.5f;
@@ -1027,7 +1031,7 @@ void parse_command()
   else if(!strcmp(response, "quit")) { game.over = 1; game.program_run = 0;  }
   else if(!strcmp(response, "result")) {
     game.over = 1;
-#if TDLEAF && NNUE
+#if TDLEAF && NNUE && !TDLEAF_READONLY
     if (nnue_available && game.td_game.n_plies > 0) {
       // xboard sends: "result 1-0 {description}" or "0-1" or "1/2-1/2"
       char result_str[20] = "";

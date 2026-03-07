@@ -76,7 +76,10 @@ void tdleaf_update_after_game(TDGameRecord &rec, float result, const char *save_
 
     for (int t = 0; t < T; t++) {
         float sig_grad = d[t] * (1.0f - d[t]) / TDLEAF_K;
-        float grad_scale = TDLEAF_ALPHA * e[t] * sig_grad * cp_factor;
+        // positional is from STM perspective; score_white = (wtm ? +1 : -1) * positional * scale.
+        // nnue_apply_gradients does w -= grad, so negate for wtm to get w += gradient.
+        float wtm_sign = rec.plies[t].wtm ? -1.0f : 1.0f;
+        float grad_scale = TDLEAF_ALPHA * e[t] * sig_grad * cp_factor * wtm_sign;
 
         if (grad_scale == 0.0f) continue;
 

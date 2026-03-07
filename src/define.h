@@ -67,6 +67,13 @@
  #define TDLEAF 0
 #endif
 
+// TDLEAF_READONLY: load FC weights from .tdleaf.bin at startup (to use
+// previously trained weights) but skip all ply recording and weight updates.
+// Compile with -D NNUE=1 -D TDLEAF=1 -D TDLEAF_READONLY=1.
+#ifndef TDLEAF_READONLY
+ #define TDLEAF_READONLY 0
+#endif
+
 // define 64 bit integers and zero values for unsigned long long
 #if MSVC 
  #define ZERO 0ui64
