@@ -17,11 +17,7 @@ perl comp.pl test_fresh NNUE=1 NNUE_NET=nn-fresh.nnue OVERWRITE
 #  Each new game in the set updates the train_zeroed but not train_zeroed_ro version.
 #
 python3 tdleaf_selfplay.py EXchess_vtrain_fresh --depth 6 --engine2 EXchess_vtrain_fresh_ro --depth2 6 --move-timeout 10 -n 500
-python match.py ../learn/EXchess_vtrain_fresh ../learn/EXchess_vtrain_fresh_ro -c 1 -tc 0:03+0.05 -n 500
-
-# or do in a loop if we expect significant growth in playing strength of the net during training
-for i in {1..10}; do python3 tdleaf_selfplay.py EXchess_vtrain_fresh --depth 6 --engine2 EXchess_vtrain_fresh_ro --depth2 6 --move-timeout 10 -n 500; done
-for i in {1..10}; python ../run/match.py ./EXchess_vtrain_fresh ./EXchess_vtrain_fresh_ro -c 1 -tc 0:03+0.05 -n 500; done
+python match.py ../learn/EXchess_vtrain_fresh ../learn/EXchess_vtrain_fresh_ro -c 5 -tc 0:03+0.05 --wait 500 -n 500
 
 
 # Four, examine the learning compared to the original

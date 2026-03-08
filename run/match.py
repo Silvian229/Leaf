@@ -45,6 +45,8 @@ def main():
                         help="Openings file (.epd or .pgn); randomly ordered")
     parser.add_argument("--ponder", action="store_true", default=False,
                         help="Enable pondering (default: off)")
+    parser.add_argument("--wait", type=int, default=0, metavar="MS",
+                        help="Milliseconds to wait between games (-wait in cutechess-cli, default: 0)")
     args = parser.parse_args()
 
     # Validate concurrency
@@ -95,7 +97,7 @@ def main():
         "-resign", "movecount=6",   "score=600",
         "-pgnout", pgn_out,
         "-ratinginterval", "10",
-    ] + games_arg
+    ] + games_arg + (["-wait", str(args.wait)] if args.wait > 0 else [])
 
     if args.openings:
         if not os.path.isfile(args.openings):
