@@ -1,7 +1,7 @@
 # Ignore everything by default
 *
 
-# Except src/, run/*.py, run/*.txt, and this file
+# Except src/, run/*.py, run/*.txt, learn/, and this file
 !src/
 !src/**
 !.gitignore
@@ -9,6 +9,12 @@
 run/*
 !run/*.py
 !run/*.txt
+!learn/
+learn/*
+!learn/*.py
+!learn/*.pl
+!learn/*.pgn
+!learn/*.txt
 
 # Within src/, ignore OS/editor artifacts and binary/backup files
 src/.DS_Store
