@@ -13,7 +13,6 @@ run/*
 learn/*
 !learn/*.py
 !learn/*.pl
-!learn/*.pgn
 !learn/*.txt
 
 # Within src/, ignore OS/editor artifacts and binary/backup files
