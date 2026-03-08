@@ -1,11 +1,9 @@
-
-
-
-
 Changes since 2017_12_24
+
 2026_03_01 to 2026_03_09 -- Major new feature: NNUE evaluation and TDLeaf(λ) online learning.
                New files: src/nnue.h, src/nnue.cpp, src/tdleaf.h, src/tdleaf.cpp.
                Build with: perl comp.pl <vers> NNUE=1  (add TDLEAF=1 for learning).
+               See NNUE.md and TDLEAF_PLAN.md for details.
 
 NNUE Evaluation (NNUE=1):
 2026_03_01 -- Added HalfKAv2_hm NNUE evaluation compatible with Stockfish 15.1.
@@ -56,7 +54,10 @@ TDLeaf(λ) Online Learning (NNUE=1 TDLEAF=1):
                rook=28880, queen=51984).  Enables training from a fresh random network.
 
 Infrastructure:
-2026_03_08 -- comp.pl: added OVERWRITE flag to skip interactive overwrite prompt.
+2026_03_08 -- Cleanup: moved train_commands.txt from run/ to learn/; added
+               run/verify_fc0.py (Python script to verify EXchess FC0 computation
+               against raw .nnue file, useful for debugging forward-pass accuracy).
+             -- comp.pl: added OVERWRITE flag to skip interactive overwrite prompt.
              -- tdleaf_selfplay.py: engine name resolution now prefers CWD over the
                script directory, so the script works correctly when invoked from
                learn/ or other directories without resolving engines to run/.
