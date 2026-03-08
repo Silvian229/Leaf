@@ -231,6 +231,7 @@ Key hyperparameters (in `src/tdleaf.h`):
 | `TDLEAF_ALPHA` | 200 | Learning rate for FC and FT layers |
 | `NNUE_FT_LR_SCALE` | 1.0 | FT accumulator LR multiplier (no extra scale needed) |
 | `NNUE_PSQT_LR_SCALE` | 1000 | PSQT LR multiplier (large: PSQT bypasses FC chain) |
+| `NNUE_FC_BIAS_LR_SCALE` | 1000 | FC bias LR multiplier (wtm_sign cancellation fix) |
 | `TDLEAF_LAMBDA` | 0.7 | Eligibility trace decay |
 | `TDLEAF_K` | 400 | Sigmoid temperature (cp) |
 

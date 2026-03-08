@@ -47,6 +47,22 @@ TDLeaf(λ) Online Learning (NNUE=1 TDLEAF=1):
                NNUE_PSQT_LR_SCALE=1000 (large value needed: grad_scale≈2e-4 while
                PSQT weights are at int32 scale ~5776/pawn).
 
+2026_03_08 -- Fixed FC bias updates: TDLeaf's alternating wtm_sign causes near-complete
+               per-game cancellation of bias gradients (unlike weights, biases lack the
+               non-negative l0_in[i] multiplier that breaks cancellation).  Fix: added
+               NNUE_FC_BIAS_LR_SCALE = 1000 in tdleaf.h, applied to all three FC bias
+               gradient accumulation lines in nnue_accumulate_gradients.
+             -- Concurrent .tdleaf.bin file access: multiple simultaneous EXchess instances
+               (e.g. multi-game self-play) can now share a single .tdleaf.bin safely.
+               Design: per-session delta accumulators (delta_l0_w/b, delta_l1_w/b,
+               delta_l2_w/b, ft_delta_f32, psqt_delta_f32) track weight changes since
+               the last file write.  On each write: acquire LOCK_EX on a companion
+               .tdleaf.bin.lock file, re-read the current .tdleaf.bin, merge
+               (file_value + our_delta) per entry, write merged content to a .tmp file,
+               rename atomically to .tdleaf.bin, release lock.  Reads use LOCK_SH.
+               This ensures each instance's updates survive and do not overwrite
+               concurrent changes from other instances.
+
 2026_03_08 -- Added --init-nnue --write-nnue mode: creates a randomly initialised .nnue
                from scratch (no source .nnue needed) using N(mean,std) distributions
                measured from nn-ad9b42354671.nnue for FC layers, N(-0.71,44.41) for FT
@@ -58,6 +74,9 @@ Infrastructure:
                run/verify_fc0.py (Python script to verify EXchess FC0 computation
                against raw .nnue file, useful for debugging forward-pass accuracy).
              -- comp.pl: added OVERWRITE flag to skip interactive overwrite prompt.
+             -- match.py: added --wait option (passes -wait MS to cutechess-cli); useful
+               when multiple TDLeaf instances share a .tdleaf.bin and need breathing room
+               between file-lock acquisitions.
              -- tdleaf_selfplay.py: engine name resolution now prefers CWD over the
                script directory, so the script works correctly when invoked from
                learn/ or other directories without resolving engines to run/.

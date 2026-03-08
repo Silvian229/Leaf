@@ -159,7 +159,14 @@ FC2 output (positional)
   weights are at int32 scale (~5,776 per pawn).  Without the amplification, per-game
   updates would be ~1/10,000 of a pawn.
 
-FT and PSQT learning rates are tuned independently.  Only change one at a time.
+- `NNUE_FC_BIAS_LR_SCALE` multiplies all FC bias gradients (grad_l0_b, grad_l1_b, grad_l2_b).
+  Bias gradients lack the non-negative `l0_in[i]` factor that weight gradients carry.
+  Because TDLeaf alternates `wtm_sign × e[t]` between +1 and −1, bias gradients from
+  white-to-move and black-to-move plies nearly cancel across a game, leaving per-game
+  net bias gradient < 0.5 int32 units — invisible after rounding.  A large multiplier
+  (~1000) is needed to produce visible updates.
+
+FT, PSQT, and FC biases all have independent LR scales; tune one at a time.
 
 ---
 
@@ -179,6 +186,70 @@ drift across sessions.  Update counts enable weighted averaging of concurrent tr
 
 Version 2 files (FC only) are still accepted on load; a notice is printed and the file
 will be upgraded to version 3 on the next save.
+
+---
+
+## Concurrent File Access
+
+Multiple EXchess instances (e.g. several parallel self-play games) can share a single
+`.tdleaf.bin` safely via POSIX file locking and delta-based merging.
+
+### Design
+
+**Problem:** If two instances both read the file, apply their gradient updates to their
+in-memory weights, and then write back, the second write silently overwrites the first
+instance's changes.
+
+**Solution:** Each instance tracks only its own accumulated weight *deltas* since the last
+file write (not the full weight values).  On each write:
+
+1. Acquire `LOCK_EX` on a companion `.tdleaf.bin.lock` file.
+2. Re-read the current `.tdleaf.bin` from disk.
+3. Merge: `merged_value = file_value + our_delta` for every entry.
+4. Update the in-memory float shadows to the merged values; zero the deltas.
+5. Write the merged content to `.tdleaf.bin.tmp`.
+6. `rename(.tmp, .tdleaf.bin)` — atomic on POSIX filesystems.
+7. Release the lock (close the lock-file fd).
+
+Reads use `LOCK_SH` (multiple simultaneous readers allowed; blocked only during a write).
+
+### Implementation Details
+
+**Lock file:** `.tdleaf.bin.lock` is a separate companion file so locking survives the
+atomic `rename()` of the main file.  The lock is held only during the re-read/write cycle
+(a few milliseconds), not across the entire game.
+
+**Delta arrays** (in `nnue.cpp`):
+
+| Array | Size | Contents |
+|-------|------|----------|
+| `delta_l0_w[8][1024×16]` | 512 KB | FC0 weight deltas |
+| `delta_l0_b[8][16]` | 512 B | FC0 bias deltas |
+| `delta_l1_w[8][32×32]` | 256 KB | FC1 weight deltas |
+| `delta_l1_b[8][32]` | 1 KB | FC1 bias deltas |
+| `delta_l2_w[8][32]` | 1 KB | FC2 weight deltas |
+| `delta_l2_b[8]` | 32 B | FC2 bias deltas |
+| `ft_delta_f32` (heap) | ~92 MB | FT weight deltas (all rows) |
+| `psqt_delta_f32` (heap) | ~720 KB | PSQT weight deltas |
+
+Deltas are zeroed after each successful write (either on first write or after a
+re-read-merge write).  `nnue_load_fc_weights()` also zeros all deltas to establish a
+clean baseline.
+
+**Update-count merging:** counts use `max(file_count, our_count)` — an approximation
+of the total cross-instance update count sufficient for monitoring; exact accumulation
+is not required for correctness.
+
+### Usage with match.py
+
+When running parallel self-play via cutechess-cli with multiple concurrent TDLEAF
+instances, add `--wait MS` to `match.py` to insert a pause between games.  This reduces
+contention on the `.tdleaf.bin.lock` file and gives each instance time to complete its
+write cycle before the next game starts:
+
+```sh
+python3 match.py EXchess_vtrain_a EXchess_vtrain_ro -n 200 -c 4 --wait 500
+```
 
 ---
 
