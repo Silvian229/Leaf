@@ -165,23 +165,22 @@ int main(int argc, char *argv[])
       char tdleaf_path[512];
       snprintf(tdleaf_path, sizeof(tdleaf_path), "%s%s",
                exec_path, NNUE_TDLEAF_BIN);
-      bool loaded = nnue_load_fc_weights(tdleaf_path);
-      if (!loaded)
-          loaded = nnue_load_fc_weights(NNUE_TDLEAF_BIN);
-      if (!loaded) {
-        // Check for --init-tdleaf-zero command-line switch.
-        bool init_zero = false;
-        for (int ai = 1; ai < argc; ai++)
-          if (strcmp(argv[ai], "--init-tdleaf-zero") == 0) { init_zero = true; break; }
-        if (init_zero) {
-          fprintf(stderr, "TDLeaf: initializing from zero (FC/FT=0, PSQT=100cp/piece).\n");
-          nnue_init_zero_weights();
-          if (!nnue_save_fc_weights(tdleaf_path))
-              nnue_save_fc_weights(NNUE_TDLEAF_BIN);
-        } else {
+      // --init-tdleaf-zero always wins: zero-init regardless of .tdleaf.bin.
+      bool init_zero = false;
+      for (int ai = 1; ai < argc; ai++)
+        if (strcmp(argv[ai], "--init-tdleaf-zero") == 0) { init_zero = true; break; }
+      if (init_zero) {
+        fprintf(stderr, "TDLeaf: initializing from zero (FC/FT=0, PSQT=100cp/piece).\n");
+        nnue_init_zero_weights();
+        if (!nnue_save_fc_weights(tdleaf_path))
+            nnue_save_fc_weights(NNUE_TDLEAF_BIN);
+      } else {
+        bool loaded = nnue_load_fc_weights(tdleaf_path);
+        if (!loaded)
+            loaded = nnue_load_fc_weights(NNUE_TDLEAF_BIN);
+        if (!loaded)
           fprintf(stderr, "TDLeaf: no weights file found — using pretrained .nnue weights.\n"
                           "TDLeaf: run with --init-tdleaf-zero to start training from scratch.\n");
-        }
       }
     }
 #endif

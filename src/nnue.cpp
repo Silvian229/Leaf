@@ -330,11 +330,15 @@ bool nnue_load(const char *path)
     return true;
 }
 
+// Set to true by nnue_init_zero_weights(); controls description in nnue_write_nnue().
+static bool nnue_zero_initialized = false;
+
 // ---------------------------------------------------------------------------
 // nnue_write_nnue — write current FC weights into a complete .nnue file.
-// The header and FT section are copied verbatim from the originally loaded
-// .nnue file; only the 8 FC layer stacks are replaced with the current
-// (possibly TDLeaf-trained) weights.
+// FT data is copied verbatim from the originally loaded .nnue source.
+// The architecture description is updated:
+//   - Normal (trained): original description + " Trained by EXchess TDLeaf"
+//   - Zero-initialized: "Trained by EXchess TDLeaf" (replaces original)
 // ---------------------------------------------------------------------------
 bool nnue_write_nnue(const char *dst_path)
 {
@@ -349,7 +353,7 @@ bool nnue_write_nnue(const char *dst_path)
         return false;
     }
 
-    // The 8 FC stacks occupy the last NNUE_LAYER_STACKS * 17640 bytes of the file.
+    // The 8 FC stacks occupy the last NNUE_LAYER_STACKS * STACK_BYTES bytes of the file.
     const long STACK_BYTES = 4                             // hash
                            + (long)NNUE_L0_SIZE * 4        // FC0 biases
                            + (long)NNUE_L0_SIZE * NNUE_L0_INPUT  // FC0 weights
@@ -363,6 +367,27 @@ bool nnue_write_nnue(const char *dst_path)
     long ft_end    = file_size - (long)NNUE_LAYER_STACKS * STACK_BYTES;
     rewind(src);
 
+    // Read original header: version(4) + hash(4) + desc_size(4) + desc(N) + ft_hash(4)
+    uint32_t version, file_hash, orig_desc_size;
+    fread(&version,        sizeof(uint32_t), 1, src);
+    fread(&file_hash,      sizeof(uint32_t), 1, src);
+    fread(&orig_desc_size, sizeof(uint32_t), 1, src);
+    char orig_desc[4096] = {};
+    if (orig_desc_size > 0 && orig_desc_size < sizeof(orig_desc))
+        fread(orig_desc, 1, orig_desc_size, src);
+    uint32_t ft_hash;
+    fread(&ft_hash, sizeof(uint32_t), 1, src);
+    // src is now positioned at the start of the FT LEB128 data.
+    long ft_data_start = (long)(4 + 4 + 4 + orig_desc_size + 4);
+
+    // Build new description.
+    char new_desc[4096];
+    if (nnue_zero_initialized)
+        snprintf(new_desc, sizeof(new_desc), "Trained by EXchess TDLeaf");
+    else
+        snprintf(new_desc, sizeof(new_desc), "%s Trained by EXchess TDLeaf", orig_desc);
+    uint32_t new_desc_size = (uint32_t)strlen(new_desc);
+
     FILE *dst = fopen(dst_path, "wb");
     if (!dst) {
         fprintf(stderr, "nnue_write_nnue: cannot create '%s'\n", dst_path);
@@ -370,9 +395,16 @@ bool nnue_write_nnue(const char *dst_path)
         return false;
     }
 
-    // Copy header + FT section verbatim.
+    // Write new header.
+    fwrite(&version,       sizeof(uint32_t), 1, dst);
+    fwrite(&file_hash,     sizeof(uint32_t), 1, dst);
+    fwrite(&new_desc_size, sizeof(uint32_t), 1, dst);
+    fwrite(new_desc,       1, new_desc_size, dst);
+    fwrite(&ft_hash,       sizeof(uint32_t), 1, dst);
+
+    // Copy FT LEB128 data verbatim (from after the old header to ft_end).
     char buf[65536];
-    long remaining = ft_end;
+    long remaining = ft_end - ft_data_start;
     while (remaining > 0) {
         size_t chunk = (remaining > (long)sizeof(buf)) ? sizeof(buf) : (size_t)remaining;
         size_t nr = fread(buf, 1, chunk, src);
@@ -1058,6 +1090,7 @@ void nnue_init_zero_weights()
 
     // Sync all int8/int16/int32 inference arrays from the zeroed float shadows.
     nnue_requantize_fc();
+    nnue_zero_initialized = true;
     printf("NNUE TDLeaf: initialised FC/FT=0, PSQT=100 cp/piece (11552 int32 per feature)\n");
 }
 
