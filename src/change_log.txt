@@ -69,6 +69,23 @@ TDLeaf(λ) Online Learning (NNUE=1 TDLEAF=1):
                weights, and signed piece values for PSQT (pawn=5776, knight/bishop=17328,
                rook=28880, queen=51984).  Enables training from a fresh random network.
 
+2026_03_09 -- FT bias training added (v4 .tdleaf.bin format).
+               FT biases (1024 int16, shared across all positions) now have a float
+               shadow (ft_biases_f32), gradient accumulator (grad_ft_bias), update
+               counts (ft_bias_cnt), and per-session delta (ft_bias_delta).
+               Gradient: grad_ft_bias[d] += NNUE_FT_BIAS_LR_SCALE × (g_acc[0][d] + g_acc[1][d]).
+               NNUE_FT_BIAS_LR_SCALE = 10.0 (tdleaf.h); tune empirically.
+               .tdleaf.bin bumped to version 4: appends float32[1024]×128 + uint32[1024]
+               FT bias section after the sparse FT/PSQT rows (+8 KB).
+               v2/v3 files still load; v3 files upgrade automatically on first save.
+             -- FT/PSQT/FC weight visualisation added to compare_fc_weights.py:
+               Page 2 (FT): bias dist, learned bias dist (v4), delta, update counts,
+               feature index coverage, FT weight dist (baseline/learned), delta, update counts.
+               Page 3 (PSQT): baseline/learned dist, delta dist, per-bucket mean-delta bar.
+             -- training_run.py: executables no longer include date in name
+               (EXchess_vtrain_<net> / EXchess_vtrain_<net>_ro); Fischer Random
+               now defaults to yes.
+
 Infrastructure:
 2026_03_08 -- Cleanup: moved train_commands.txt from run/ to learn/; added
                run/verify_fc0.py (Python script to verify EXchess FC0 computation

@@ -222,8 +222,16 @@ Self-play matches at 1 min + 0.1 s/move, 100 games each:
 
 ## TDLeaf(λ) Online Training
 
-All NNUE layers (FC0/FC1/FC2, FT, PSQT) can be trained via TDLeaf(λ) self-play.
-See `src/TDLEAF_PLAN.md` for the full reference.  Build with `NNUE=1 TDLEAF=1`.
+All NNUE layers (FC0/FC1/FC2, FT biases, FT weights, PSQT) can be trained via
+TDLeaf(λ) self-play.  See `src/TDLEAF_PLAN.md` for the full reference.
+Build with `NNUE=1 TDLEAF=1`.
+
+The `learn/training_run.py` interactive script manages a full training run: net
+selection or random init, building both a training and a read-only binary, running
+N iterations of M-game self-play matches via `run/match.py`, tracking cumulative game
+counts across sessions, and exporting the trained weights to a new `.nnue` file named
+`<net_base>-<total_games>g.nnue`.  Fischer Random (Chess960) is the default opening
+randomisation method.
 Key hyperparameters (in `src/tdleaf.h`):
 
 | Constant | Value | Notes |
@@ -232,6 +240,7 @@ Key hyperparameters (in `src/tdleaf.h`):
 | `NNUE_FT_LR_SCALE` | 1.0 | FT accumulator LR multiplier (no extra scale needed) |
 | `NNUE_PSQT_LR_SCALE` | 1000 | PSQT LR multiplier (large: PSQT bypasses FC chain) |
 | `NNUE_FC_BIAS_LR_SCALE` | 1000 | FC bias LR multiplier (wtm_sign cancellation fix) |
+| `NNUE_FT_BIAS_LR_SCALE` | 10 | FT bias LR multiplier (shared-bias cancellation fix) |
 | `TDLEAF_LAMBDA` | 0.7 | Eligibility trace decay |
 | `TDLEAF_K` | 400 | Sigmoid temperature (cp) |
 

@@ -134,8 +134,8 @@ def main():
     # -----------------------------------------------------------------------
     print()
     print("Building executables:")
-    train_ver = f"train_{net_base}_{date_str}"
-    ro_ver    = f"train_{net_base}_{date_str}_ro"
+    train_ver = f"train_{net_base}"
+    ro_ver    = f"train_{net_base}_ro"
     train_exe = os.path.join(learn_dir, f"EXchess_v{train_ver}")
     ro_exe    = os.path.join(learn_dir, f"EXchess_v{ro_ver}")
     nnue_flag = f"NNUE_NET={net_filename}"
@@ -212,7 +212,7 @@ def main():
     tc          = ask(    "  Time control        [-tc]       ", "0:03+0.05")
     concurrency = int(ask( "  Concurrency         [-c]        ", default_concurrency))
     wait_ms     = int(ask("  Wait between games  [--wait ms] ", 500))
-    fischer     = ask_yes_no("  Fischer Random? [--fischer-random]", default="n")
+    fischer     = ask_yes_no("  Fischer Random? [--fischer-random]", default="y")
 
     total_new   = n_games * n_iters
     total_after = prior_games + total_new

@@ -41,7 +41,7 @@ e_t     = (d_{t+1} - d_t) + λ * e_{t+1}     for t = T-2 … 0
 
 where `∇_w d_t = d_t * (1 - d_t) / K * ∇_w score_t`.
 
-Defaults: `λ = 0.7`, `K = 400`, `TDLEAF_ALPHA = 200` (FC+FT), `NNUE_FT_LR_SCALE = 1.0` (FT accumulator), `NNUE_PSQT_LR_SCALE = 1000` (PSQT).
+Defaults: `λ = 0.7`, `K = 400`, `TDLEAF_ALPHA = 200` (FC+FT), `NNUE_FT_LR_SCALE = 1.0` (FT weights), `NNUE_FT_BIAS_LR_SCALE = 10.0` (FT biases), `NNUE_PSQT_LR_SCALE = 1000` (PSQT), `NNUE_FC_BIAS_LR_SCALE = 1000` (FC biases).
 
 **Key design choice:** `d_t` is computed from `nnue_evaluate()` (direct static eval of the
 PV leaf), not from the search score propagated from the root.  This ensures the sigmoid
@@ -57,12 +57,16 @@ position, making the gradient self-consistent.
 | FC0 weights/biases | 1,024×16 int8 + 16 int32, ×8 stacks | Quantized int8, float shadow |
 | FC1 weights/biases | 32×32 int8 + 32 int32, ×8 stacks | Same |
 | FC2 weights/bias   | 32 int8 + 1 int32, ×8 stacks | Same |
+| FT biases          | 1,024 int16 | Dense update; static float shadow (4 KB) |
 | FT weights         | 22,528×1,024 int16 | Sparse update; float shadow on heap (~92 MB) |
 | PSQT weights       | 22,528×8 int32 | Sparse update; float shadow (~720 KB) |
 
-FT and PSQT are updated sparsely: only the ~30–60 feature rows active at each leaf
-position are touched.  `ft_dirty[FT_INPUTS]` tracks which rows received gradient during
-the game; only dirty rows are scanned in `nnue_apply_gradients`.
+FT weights and PSQT are updated sparsely: only the ~30–60 feature rows active at each
+leaf position are touched.  `ft_dirty[FT_INPUTS]` tracks which rows received gradient
+during the game; only dirty rows are scanned in `nnue_apply_gradients`.
+
+FT biases are updated densely every game (all 1,024 values): the gradient is the sum of
+`g_acc[persp][d]` across both perspectives, amplified by `NNUE_FT_BIAS_LR_SCALE`.
 
 ---
 
@@ -166,26 +170,33 @@ FC2 output (positional)
   net bias gradient < 0.5 int32 units — invisible after rounding.  A large multiplier
   (~1000) is needed to produce visible updates.
 
-FT, PSQT, and FC biases all have independent LR scales; tune one at a time.
+- `NNUE_FT_BIAS_LR_SCALE` multiplies `g_acc[0][d] + g_acc[1][d]` for the FT bias gradient.
+  FT biases are shared across all positions, so per-game cancellation is significant (same
+  mechanism as FC biases).  The SqrCReLU backward clamp factors provide some asymmetry,
+  so a moderate multiplier (~10) is likely sufficient.  Start with 10.0 and tune empirically.
+
+FT, PSQT, FC biases, and FT biases all have independent LR scales; tune one at a time.
 
 ---
 
-## Weight Persistence — `.tdleaf.bin` (version 3)
+## Weight Persistence — `.tdleaf.bin` (version 4)
 
 Saved at `{exec_path}nn-ad9b42354671.tdleaf.bin`.  Format:
 
 ```
-[v2 header: version(4) + 8 FC stacks + per-layer weight/bias/count arrays]
+[version(4) + 8 FC stacks: per-layer float32×128 weights/biases + uint32 counts]
 [n_ft_rows(4 bytes)]
-[per dirty row: fi(4) + ft_w[1024]×128 as int32[1024] + ft_cnt[1024] as uint32[1024]
-                      + psqt_w[8]×128 as int32[8]    + psqt_cnt[8]  as uint32[8]]
+[per dirty row: fi(4) + ft_w[1024]×128 as float32[1024] + ft_cnt[1024] as uint32[1024]
+                      + psqt_w[8]×128 as float32[8]    + psqt_cnt[8]  as uint32[8]]
+[FT bias section (v4): ft_bias[1024]×128 as float32[1024] + ft_bias_cnt[1024] as uint32[1024]]
 ```
 
 Values are stored at 128× resolution (divide by 128 on load) to preserve sub-integer
 drift across sessions.  Update counts enable weighted averaging of concurrent training runs.
 
-Version 2 files (FC only) are still accepted on load; a notice is printed and the file
-will be upgraded to version 3 on the next save.
+Version 3 files (FC + FT/PSQT, no FT bias) are still accepted on load; FT biases start
+from the `.nnue` baseline and will be included on the next save.
+Version 2 files (FC only) are also still accepted.  A notice is printed in both cases.
 
 ---
 
@@ -231,6 +242,7 @@ atomic `rename()` of the main file.  The lock is held only during the re-read/wr
 | `delta_l2_b[8]` | 32 B | FC2 bias deltas |
 | `ft_delta_f32` (heap) | ~92 MB | FT weight deltas (all rows) |
 | `psqt_delta_f32` (heap) | ~720 KB | PSQT weight deltas |
+| `ft_bias_delta[1024]` | 4 KB | FT bias deltas (static) |
 
 Deltas are zeroed after each successful write (either on first write or after a
 re-read-merge write).  `nnue_load_fc_weights()` also zeros all deltas to establish a
