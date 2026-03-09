@@ -30,7 +30,7 @@ This work was developed interactively with [Claude Code](https://claude.ai/claud
 
 EXchess supports **HalfKAv2_hm** NNUE evaluation compatible with Stockfish 15.1 era networks.  Build with `NNUE=1`.
 
-The included network file, **`nn-ad9b42354671.nnue`** (the exact Stockfish 15.1 release network, 47 MB), serves three distinct purposes in the project:
+The current default network file, **`nn-ad9b42354671.nnue`** is the original Stockfish 15.1 release network and serves three distinct purposes in the project:
 
 **1. Implementation correctness anchor.**
 Because this is the exact network shipped with Stockfish 15.1, EXchess's forward pass can be validated against the Stockfish 15.1 source line by line.  Any discrepancy in evaluation of a given position is a bug in EXchess, not an approximation.  This property was used extensively during development: several significant bugs were isolated and fixed by comparing EXchess evaluation against Stockfish on the same position, including an incorrect feature index for the own king, a wrong SqrCReLU formulation that zeroed all negative pre-activations, and an incorrect PSQT scale factor.  After all fixes, EXchess matches Stockfish 15.1 evaluation exactly (within 1 cp rounding) on every tested position.
