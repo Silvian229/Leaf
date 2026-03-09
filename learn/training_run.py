@@ -7,18 +7,21 @@
 #
 # What this script does:
 #   1. Asks for a starting .nnue file or offers to initialise a fresh random one.
-#   2. Builds a training binary and a read-only binary for the chosen network,
-#      using comp.pl with NNUE_NET= so both binaries know which .nnue and
-#      .tdleaf.bin to use.
+#   2. Builds a training binary and a read-only binary for the chosen network
+#      (via comp.pl in run/), then moves both binaries to learn/ so all
+#      training files live together.
 #   3. Checks for an existing .tdleaf.bin (continue or start fresh).
 #   4. Asks for match parameters, then runs match.py for N games × I iterations.
 #      PGN files land in  learn/pgn/<net_base>/  so all PGNs for a given net
 #      accumulate in one place across multiple training runs.
 #   5. After matches complete, exports the trained weights to a .nnue file whose
 #      name encodes the total number of training games to that point:
-#        nn-<net_base>-<total_games>g.nnue
-#      Game counts are tracked in a sidecar file (run/<net_base>.games) that
+#        <net_base>-<total_games>g.nnue
+#      Game counts are tracked in a sidecar file (learn/<net_base>.games) that
 #      persists across multiple runs on the same network.
+#
+# All working files (.nnue, .tdleaf.bin, .games, binaries, output .nnue) are
+# kept in learn/ for easy access.  run/ is only used for comp.pl and match.py.
 #
 
 import datetime
@@ -64,11 +67,17 @@ def write_game_count(sidecar_path, count):
 
 
 def build_binary(version, flags):
-    """Invoke comp.pl from run_dir to build EXchess_v<version>."""
+    """Invoke comp.pl from run_dir, then move the resulting binary to learn_dir."""
     cmd = ["perl", "comp.pl", version] + flags + ["OVERWRITE"]
     print(f"  $ perl comp.pl {' '.join([version] + flags)} OVERWRITE")
     result = subprocess.run(cmd, cwd=run_dir)
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    built = os.path.join(run_dir, f"EXchess_v{version}")
+    dest  = os.path.join(learn_dir, f"EXchess_v{version}")
+    if os.path.isfile(built):
+        shutil.move(built, dest)
+    return os.path.isfile(dest)
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +85,9 @@ def build_binary(version, flags):
 # ---------------------------------------------------------------------------
 
 def main():
-    cpu_count          = os.cpu_count() or 1
+    cpu_count           = os.cpu_count() or 1
     default_concurrency = max(1, cpu_count // 2)
-    date_str           = datetime.datetime.now().strftime("%Y_%m_%d")
+    date_str            = datetime.datetime.now().strftime("%y%m%d")   # YYMMDD
 
     print()
     print("=" * 62)
@@ -95,13 +104,13 @@ def main():
     choice = ask("Choice", "1")
 
     if choice.strip() == "2":
-        default_fresh = f"nn-fresh-{date_str.replace('_', '')}.nnue"
+        default_fresh = f"nn-fresh-{date_str}.nnue"
         fresh_name    = ask("Output filename for fresh network", default_fresh)
         if not fresh_name.endswith(".nnue"):
             fresh_name += ".nnue"
         net_filename   = fresh_name
         net_base       = os.path.splitext(net_filename)[0]
-        net_file       = os.path.join(run_dir, net_filename)
+        net_file       = os.path.join(learn_dir, net_filename)
         do_random_init = True
     else:
         while True:
@@ -111,24 +120,24 @@ def main():
             print(f"  File not found: {net_path}")
         net_filename   = os.path.basename(net_path)
         net_base       = os.path.splitext(net_filename)[0]
-        net_file       = os.path.join(run_dir, net_filename)
+        net_file       = os.path.join(learn_dir, net_filename)
         do_random_init = False
         if os.path.abspath(net_path) != os.path.abspath(net_file):
-            print(f"  Copying {net_path} → run/{net_filename}")
+            print(f"  Copying {net_path} → learn/{net_filename}")
             shutil.copy2(net_path, net_file)
 
-    tdleaf_bin   = os.path.join(run_dir, net_base + ".tdleaf.bin")
-    sidecar_path = os.path.join(run_dir, net_base + ".games")
+    tdleaf_bin   = os.path.join(learn_dir, net_base + ".tdleaf.bin")
+    sidecar_path = os.path.join(learn_dir, net_base + ".games")
 
     # -----------------------------------------------------------------------
-    # Step 2 — Build executables
+    # Step 2 — Build executables  (comp.pl runs in run/, binaries moved to learn/)
     # -----------------------------------------------------------------------
     print()
     print("Building executables:")
     train_ver = f"train_{net_base}_{date_str}"
     ro_ver    = f"train_{net_base}_{date_str}_ro"
-    train_exe = os.path.join(run_dir, f"EXchess_v{train_ver}")
-    ro_exe    = os.path.join(run_dir, f"EXchess_v{ro_ver}")
+    train_exe = os.path.join(learn_dir, f"EXchess_v{train_ver}")
+    ro_exe    = os.path.join(learn_dir, f"EXchess_v{ro_ver}")
     nnue_flag = f"NNUE_NET={net_filename}"
 
     rebuild = True
@@ -149,7 +158,7 @@ def main():
         print("  Using existing binaries.")
 
     # -----------------------------------------------------------------------
-    # Step 2b — Random init (after training binary exists)
+    # Step 2b — Random init (after training binary exists in learn/)
     # -----------------------------------------------------------------------
     if do_random_init:
         print()
@@ -163,7 +172,7 @@ def main():
             print(f"  Initialising fresh network → {net_filename}")
             result = subprocess.run(
                 [train_exe, "--init-nnue", "--write-nnue", net_file],
-                cwd=run_dir
+                cwd=learn_dir
             )
             if result.returncode != 0:
                 print("  --init-nnue failed.", file=sys.stderr)
@@ -179,7 +188,7 @@ def main():
     if os.path.isfile(tdleaf_bin):
         mtime = datetime.datetime.fromtimestamp(os.path.getmtime(tdleaf_bin))
         print(f"Found existing {net_base}.tdleaf.bin")
-        print(f"  Last modified : {mtime.strftime('%Y-%m-%d %H:%M')}")
+        print(f"  Last modified:   {mtime.strftime('%Y-%m-%d %H:%M')}")
         print(f"  Games on record: {prior_games:,}")
         print("  [1] Continue training from this file")
         print("  [2] Start fresh (rename existing to .tdleaf.bin.bak)")
@@ -198,11 +207,11 @@ def main():
     # -----------------------------------------------------------------------
     print()
     print("Match parameters:")
-    n_games     = int(ask("  Games per iteration [-n]       ", 500))
-    n_iters     = int(ask("  Iterations          [-i]       ", 10))
-    tc          = ask(    "  Time control        [-tc]      ", "0:03+0.05")
-    concurrency = int(ask(f"  Concurrency         [-c]       ", default_concurrency))
-    wait_ms     = int(ask("  Wait between games  [--wait ms]", 500))
+    n_games     = int(ask("  Games per iteration [-n]        ", 500))
+    n_iters     = int(ask("  Iterations          [-i]        ", 10))
+    tc          = ask(    "  Time control        [-tc]       ", "0:03+0.05")
+    concurrency = int(ask( "  Concurrency         [-c]        ", default_concurrency))
+    wait_ms     = int(ask("  Wait between games  [--wait ms] ", 500))
     fischer     = ask_yes_no("  Fischer Random? [--fischer-random]", default="n")
 
     total_new   = n_games * n_iters
@@ -211,16 +220,18 @@ def main():
     # -----------------------------------------------------------------------
     # PGN directory  —  learn/pgn/<net_base>/
     # -----------------------------------------------------------------------
-    pgn_dir  = os.path.join(learn_dir, "pgn", net_base)
+    pgn_dir       = os.path.join(learn_dir, "pgn", net_base)
     os.makedirs(pgn_dir, exist_ok=True)
-    # match.py appends _iter01.pgn etc. when -i > 1, or uses the name as-is
-    # for a single iteration.
     pgn_base_path = os.path.join(pgn_dir, f"match_{net_base}.pgn")
 
     # -----------------------------------------------------------------------
     # Confirm
     # -----------------------------------------------------------------------
-    output_net_name = f"nn-{net_base}-{total_after}g.nnue"
+    # net_base already contains the "nn-" prefix (e.g. "nn-ad9b42354671"),
+    # so the output name is simply  <net_base>-<games>g.nnue.
+    output_net_name = f"{net_base}-{total_after}g.nnue"
+    output_net_path = os.path.join(learn_dir, output_net_name)
+
     print()
     print("=" * 62)
     print(f"  Net in:           {net_filename}")
@@ -232,8 +243,8 @@ def main():
     print(f"  TC: {tc}   Concurrency: {concurrency}   Wait: {wait_ms} ms")
     if fischer:
         print( "  Fischer Random:   yes")
-    print(f"  PGN directory:    {pgn_dir}")
-    print(f"  Output net:       {output_net_name}  (run/ and learn/)")
+    print(f"  PGN directory:    {pgn_dir}/")
+    print(f"  Output net:       {output_net_name}  (learn/)")
     print("=" * 62)
 
     if not ask_yes_no("Proceed?", default="y"):
@@ -247,8 +258,8 @@ def main():
     match_py  = os.path.join(run_dir, "match.py")
     match_cmd = [
         sys.executable, match_py,
-        f"EXchess_v{train_ver}",
-        f"EXchess_v{ro_ver}",
+        train_exe,          # absolute path — match.py passes these straight to cutechess
+        ro_exe,
         "-n", str(n_games),
         "-i", str(n_iters),
         "-tc", tc,
@@ -266,26 +277,21 @@ def main():
         print("Game count sidecar NOT updated (re-run to continue from last checkpoint).")
         sys.exit(result.returncode)
 
-    # Update sidecar now that all iterations completed successfully
+    # Update sidecar only after all iterations complete successfully
     write_game_count(sidecar_path, total_after)
 
     # -----------------------------------------------------------------------
     # Step 6 — Export trained .nnue
     # -----------------------------------------------------------------------
     print()
-    output_net_run   = os.path.join(run_dir,   output_net_name)
-    output_net_learn = os.path.join(learn_dir, output_net_name)
-
     print(f"Exporting trained weights → {output_net_name}")
     result = subprocess.run(
-        [train_exe, "--write-nnue", output_net_run],
-        cwd=run_dir
+        [train_exe, "--write-nnue", output_net_path],
+        cwd=learn_dir
     )
     if result.returncode != 0:
         print("--write-nnue failed.", file=sys.stderr)
         sys.exit(result.returncode)
-
-    shutil.copy2(output_net_run, output_net_learn)
 
     # -----------------------------------------------------------------------
     # Summary
@@ -294,7 +300,7 @@ def main():
     print("=" * 62)
     print("  Training run complete.")
     print(f"  Net in:      {net_filename}")
-    print(f"  Net out:     {output_net_name}  (run/ and learn/)")
+    print(f"  Net out:     {output_net_name}  (learn/)")
     print(f"  Games added: {total_new:,}  ({n_iters} iter × {n_games} games)")
     print(f"  Total games: {total_after:,}")
     print(f"  PGN files:   {pgn_dir}/")
