@@ -3,7 +3,7 @@ Changes since 2017_12_24
 2026_03_01 to 2026_03_09 -- Major new feature: NNUE evaluation and TDLeaf(λ) online learning.
                New files: src/nnue.h, src/nnue.cpp, src/tdleaf.h, src/tdleaf.cpp.
                Build with: perl comp.pl <vers> NNUE=1  (add TDLEAF=1 for learning).
-               See NNUE.md and TDLEAF_PLAN.md for details.
+               See src/docs/NNUE.md and src/docs/TDLEAF.md for details.
 
 NNUE Evaluation (NNUE=1):
 2026_03_01 -- Added HalfKAv2_hm NNUE evaluation compatible with Stockfish 15.1.
@@ -116,7 +116,7 @@ Infrastructure:
                tdleaf_selfplay.py.
              -- Archived unused src/ files (MinGW/old release build scripts, FLTK
                GUI source) to archives/src/.
-             -- Added src/NNUE.md and src/TDLEAF_PLAN.md as implementation references.
+             -- Added src/docs/NNUE.md and src/docs/TDLEAF.md as implementation references.
 
 -------------- old change log below -------------------
 

@@ -223,7 +223,7 @@ Self-play matches at 1 min + 0.1 s/move, 100 games each:
 ## TDLeaf(λ) Online Training
 
 All NNUE layers (FC0/FC1/FC2, FT biases, FT weights, PSQT) can be trained via
-TDLeaf(λ) self-play.  See `src/TDLEAF_PLAN.md` for the full reference.
+TDLeaf(λ) self-play.  See `src/docs/TDLEAF.md` for the full reference.
 Build with `NNUE=1 TDLEAF=1`.
 
 The `learn/training_run.py` interactive script manages a full training run: net
@@ -246,4 +246,4 @@ Key hyperparameters (in `src/tdleaf.h`):
 
 ---
 
-See `TODO.md` for planned improvements and open investigations.
+See `src/docs/TODO.md` for planned improvements and open investigations.

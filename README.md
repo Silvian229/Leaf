@@ -65,7 +65,7 @@ The network file itself is not modified by EXchess.  All trained weights are sto
 | FC2 | 32 → 1 (FC0 output-15 adds as passthrough) |
 | Score formula | `(psqt_diff/2 + positional) × 100 / 5776` (Stockfish 15.1 exact) |
 
-See [`src/NNUE.md`](src/NNUE.md) for full architecture notes, NEON optimizations, and benchmark results.
+See [`src/docs/NNUE.md`](src/docs/NNUE.md) for full architecture notes, NEON optimizations, and benchmark results.
 
 ### TDLeaf(λ) Online Learning
 
@@ -77,7 +77,7 @@ EXchess includes a complete **TDLeaf(λ)** reinforcement learning system (Baxter
 - Weights are persisted to a companion `.tdleaf.bin` file after each game, supporting fine-tuning from the Stockfish 15.1 starting point or training from a randomly initialised network
 - **Concurrent multi-instance support:** multiple engine processes can share a single `.tdleaf.bin` via POSIX file locking and per-session delta accumulation with atomic rename
 
-Build with `NNUE=1 TDLEAF=1`.  See [`src/TDLEAF_PLAN.md`](src/TDLEAF_PLAN.md) for the full algorithm, gradient flow, file format, and hyperparameter reference.
+Build with `NNUE=1 TDLEAF=1`.  See [`src/docs/TDLEAF.md`](src/docs/TDLEAF.md) for the full algorithm, gradient flow, file format, and hyperparameter reference.
 
 ---
 
