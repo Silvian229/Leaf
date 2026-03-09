@@ -5,6 +5,7 @@
 !src/
 !src/**
 !.gitignore
+!README.md
 !run/
 run/*
 !run/*.py
