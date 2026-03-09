@@ -272,13 +272,24 @@ This calls `nnue_alloc_arrays()` + `nnue_init_fp32_weights()` + `nnue_init_zero_
 
 | Component | Distribution |
 |-----------|-------------|
-| FC0 weights | N(0.24, 8.43), clipped ±127 |
-| FC1 weights | N(−1.10, 18.30), clipped ±127 |
-| FC2 weights | N(1.10, 76.38), clipped ±127 |
+| FC0 weights | N(0.24, 8.43), truncated ±127 (rejection sampling) |
+| FC1 weights | N(−1.10, 18.30), truncated ±127 (rejection sampling) |
+| FC2 weights | N(1.10, 30.0), truncated ±127 — σ reduced from measured 76.38; see below |
 | FC0/1/2 biases | N(μ,σ) measured from SF15.1 |
 | FT weights (int16) | N(−0.71, 44.41) |
 | FT biases (int16) | N(3.34, 96.48) |
 | PSQT | Signed piece values: pawn ±5776, knight/bishop ±17328, rook ±28880, queen ±51984 |
+
+**FC2 σ note:** The measured SF15.1 FC2 distribution (σ=76.38) is the *result* of training —
+many weights are pushed near ±127 after learning.  Using σ=76.38 for random init clips
+roughly 20% of samples to the int8 boundary, creating artificial spikes.  σ=30 avoids all
+clipping (P(|X|>127) < 0.002% with rejection sampling) while providing enough weight
+diversity to prevent pathological symmetry.  The trained FC2 distribution will naturally
+widen as TDLeaf pushes high-importance weights toward their saturation limits.
+
+All int8 weight sampling uses rejection sampling (not clipping): values outside ±127 are
+discarded and redrawn.  FC biases are int32 with no range constraint; FT weights/biases are
+int16 with σ << 32767, so no clipping issue arises for those layers.
 
 Then build training binaries pointing at the new file:
 

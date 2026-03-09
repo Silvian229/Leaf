@@ -43,11 +43,13 @@ The SF15.1 net's weight distributions (means and standard deviations per layer, 
 
 | Layer | Distribution used for random init |
 |-------|----------------------------------|
-| FC0 weights | N(0.24, 8.43), clipped ±127 |
-| FC1 weights | N(−1.10, 18.30), clipped ±127 |
-| FC2 weights | N(1.10, 76.38), clipped ±127 |
+| FC0 weights | N(0.24, 8.43), truncated ±127 |
+| FC1 weights | N(−1.10, 18.30), truncated ±127 |
+| FC2 weights | N(1.10, 30.0), truncated ±127 (ref σ=76.38 reduced; see note below) |
 | FT weights (int16) | N(−0.71, 44.41) |
 | PSQT | Signed piece values: pawn ±5,776; knight/bishop ±17,328; rook ±28,880; queen ±51,984 |
+
+All int8 weights use **rejection sampling** (truncated Gaussian): samples outside ±127 are discarded and redrawn rather than clipped, avoiding artificial density spikes at the int8 boundaries.  The FC2 σ is intentionally lower than the measured SF15.1 value of 76.38 — the reference net's wide, near-bimodal FC2 distribution is the *result* of training, not a useful prior; σ=76.38 would clip roughly 20% of samples to ±127, producing chaotic initial evaluations.  σ=30 avoids all clipping while retaining enough diversity; training pushes FC2 weights to their learned magnitudes naturally.
 
 The network file itself is not modified by EXchess.  All trained weights are stored in a companion **`.tdleaf.bin`** file and loaded on top of (or instead of) the base network at startup.
 

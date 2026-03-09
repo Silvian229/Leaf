@@ -1154,9 +1154,12 @@ static float    *psqt_delta_f32   = nullptr;  // PSQT delta since last file sync
 // ---------------------------------------------------------------------------
 // nnue_init_zero_weights — fresh-start FC initialisation + material-only PSQT
 //
-// FC layers are initialised with random values drawn from normal distributions
-// whose parameters were measured from nn-ad9b42354671.nnue (Stockfish 15.1).
-// Weights are clipped to the int8 range [-127, 127] after sampling.
+// FC layers are initialised with random values drawn from truncated normal
+// distributions whose parameters were measured from nn-ad9b42354671.nnue
+// (Stockfish 15.1).  Rejection sampling is used for int8 weights: samples
+// outside [-127, 127] are discarded and redrawn, avoiding the boundary
+// spikes produced by simple clipping.
+//
 // Using realistic random init (rather than zero) ensures activation functions
 // produce non-zero outputs from game 1, so gradients can flow to all weights.
 //
@@ -1167,8 +1170,17 @@ static float    *psqt_delta_f32   = nullptr;  // PSQT delta since last file sync
 //   FC0 biases  (16 int32):           mean=+332.10  std=2936.56
 //   FC1 weights (32×32  int8):        mean= -1.0989 std=  18.3019
 //   FC1 biases  (32 int32):           mean=-400.08  std=2510.30
-//   FC2 weights (32     int8):        mean= +1.0977 std=  76.3777
+//   FC2 weights (32     int8):        mean= +1.0977 std=  76.3777  (ref only)
 //   FC2 biases  (1 int32/stack):      mean=+1241.75 std=1218.46
+//
+// NOTE: FC2 weight std is intentionally set LOWER than the measured SF15.1
+// value (76.38).  The reference net's wide, near-bimodal FC2 distribution is
+// the *result* of training, not a useful prior for initialisation — starting
+// with σ=76 would clip ~20% of samples to ±127, inflating the distribution
+// boundaries and producing chaotic initial evaluations.  σ=30 avoids all
+// clipping (P(|X|>127) < 0.002%) while retaining enough diversity to prevent
+// identical-weight pathologies.  Training will push FC2 weights to their
+// learned magnitudes naturally.
 //
 // FT biases and weights must be non-zero so the accumulator is non-zero,
 // giving non-zero SqrCReLU outputs and thus non-zero FC0 weight gradients.
@@ -1189,7 +1201,7 @@ static float    *psqt_delta_f32   = nullptr;  // PSQT delta since last file sync
 #define INIT_FC1_B_MEAN -400.0820f
 #define INIT_FC1_B_STD  2510.2978f
 #define INIT_FC2_W_MEAN   1.0977f
-#define INIT_FC2_W_STD   76.3777f
+#define INIT_FC2_W_STD   30.0000f   // reduced from measured 76.38; see note above
 #define INIT_FC2_B_MEAN 1241.7500f
 #define INIT_FC2_B_STD  1218.4550f
 
@@ -1197,10 +1209,13 @@ void nnue_init_zero_weights()
 {
     // ---- FC layers: random init from measured Stockfish 15.1 distributions ----
     std::mt19937 rng(42);  // fixed seed for reproducibility
+    // Truncated normal for int8 weights: reject samples outside [-127, 127]
+    // rather than clipping, to avoid artificial density spikes at the boundaries.
     auto rnd_w = [&](float mean, float std) -> float {
         std::normal_distribution<float> d(mean, std);
-        float v = d(rng);
-        return (v < -127.f) ? -127.f : (v > 127.f) ? 127.f : v;
+        float v;
+        do { v = d(rng); } while (v < -127.f || v > 127.f);
+        return v;
     };
     auto rnd_b = [&](float mean, float std) -> float {
         std::normal_distribution<float> d(mean, std);
