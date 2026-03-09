@@ -8,7 +8,8 @@
 //   Weight update:
 //     Δw = alpha * Σ_t  e_t * ∇_w d_t
 //
-// Only the FC layers (FC0/FC1/FC2) are trained.  The FT (46 MB) is unchanged.
+// FC layers (FC0/FC1/FC2) and FT biases (1024 int16) are trained.  FT weights
+// and PSQT are also trained (FT weights 46 MB, PSQT 720 KB).
 // FP32 shadow copies of the FC weights are maintained in nnue.cpp; after each
 // game the int8 inference arrays are updated via nnue_requantize_fc().
 //
@@ -37,6 +38,10 @@ static const float NNUE_FT_LR_SCALE = 1.000f;
 //   PSQT weights are at int32 scale (a pawn ≈ 5776 units), so a large multiplier
 //   is needed to get meaningful per-game updates.
 static const float NNUE_PSQT_LR_SCALE = 1000.0f;
+// FT bias learning rate scale: applied to the FT bias gradient (g_acc[0][d] + g_acc[1][d]).
+// FT biases are shared across all positions so per-game cancellation is significant,
+// similar to FC biases. Start at 10× FT weight scale; tune empirically.
+static const float NNUE_FT_BIAS_LR_SCALE = 10.0f;
 // FC bias learning rate scale: applied to all FC bias gradients.
 // FC biases are in int32 units (FC0: ~332, FC1: ~-400, FC2: ~1242).
 // Unlike weights, bias gradients have no l0_in[i] multiplier, so TDLeaf's

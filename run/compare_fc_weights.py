@@ -44,7 +44,8 @@ TDLEAF_MAGIC    = 0x544D4C46   # "TMLF"
 TDLEAF_VERSION1 = 1
 TDLEAF_VERSION2 = 2
 TDLEAF_VERSION3 = 3
-TDLEAF_SCALE    = 128.0        # v2/v3: file stores w_f32 × TDLEAF_SCALE
+TDLEAF_VERSION4 = 4            # adds FT bias section
+TDLEAF_SCALE    = 128.0        # v2+: file stores w_f32 × TDLEAF_SCALE
 
 # ---------------------------------------------------------------------------
 # vdotq layout converters  (flat vdotq array → natural [o, i] array)
@@ -269,7 +270,7 @@ def read_tdleaf_fc(path):
         if magic != TDLEAF_MAGIC:
             sys.exit(f"Error: bad magic {magic:#010x} in {path}")
 
-        if version == TDLEAF_VERSION2 or version == TDLEAF_VERSION3:
+        if version in (TDLEAF_VERSION2, TDLEAF_VERSION3, TDLEAF_VERSION4):
             data['_has_counts'] = True
             for _ in range(N_STACKS):
                 def rf(n, fh=f):
@@ -316,8 +317,8 @@ def read_tdleaf_fc(path):
         else:
             sys.exit(f"Error: unknown .tdleaf.bin version {version} in {path}")
 
-        # v3: sparse FT/PSQT section after FC stacks
-        if version == TDLEAF_VERSION3:
+        # v3/v4: sparse FT/PSQT section after FC stacks
+        if version in (TDLEAF_VERSION3, TDLEAF_VERSION4):
             n_ft_rows = struct.unpack('<I', f.read(4))[0]
             if n_ft_rows > 0:
                 fi_arr   = np.empty(n_ft_rows, dtype=np.uint32)
@@ -339,6 +340,14 @@ def read_tdleaf_fc(path):
             else:
                 data['ft_fi'] = np.empty(0, dtype=np.uint32)
             data['n_ft_rows'] = n_ft_rows
+
+            # v4: FT bias section (appended after sparse FT/PSQT rows)
+            if version == TDLEAF_VERSION4:
+                ft_b_raw = np.frombuffer(f.read(HALF_DIMS * 4), dtype=np.float32).copy()
+                ft_b_cnt = np.frombuffer(f.read(HALF_DIMS * 4), dtype=np.uint32).copy()
+                if ft_b_raw.shape == (HALF_DIMS,) and ft_b_cnt.shape == (HALF_DIMS,):
+                    data['ft_bias_learned']     = ft_b_raw / TDLEAF_SCALE
+                    data['ft_bias_learned_cnt'] = ft_b_cnt
 
     return data
 
@@ -644,6 +653,318 @@ def plot_overview(orig, upd, save):
     return fig
 
 
+def plot_ft_overview(orig, upd, ft_data, save):
+    """
+    Page 2: FT bias and FT weight distributions.
+    Row 0: FT biases (baseline only — not trained by TDLeaf); col 1 = trained feature index
+           coverage; col 2 = per-feature max update count.
+    Row 1: FT weights — col 0 split (baseline/learned), col 1 delta or learned dist,
+           col 2 update count distribution.
+    """
+    from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+
+    nnue_name   = orig.get('_name', 'original .nnue')
+    tdleaf_name = upd.get('_name',  'updated .tdleaf.bin')
+
+    n_ft_rows       = upd.get('n_ft_rows', None)
+    has_v3          = n_ft_rows is not None and n_ft_rows > 0
+    has_ft_baseline = ft_data.get('ft_w_read', False)
+
+    fig = plt.figure(figsize=(16, 11))
+    fig.suptitle(f'FT layer comparison\n'
+                 f'blue = {nnue_name}   red = {tdleaf_name}',
+                 fontsize=11)
+
+    gs = GridSpec(2, 3, figure=fig,
+                  hspace=0.55, wspace=0.35,
+                  top=0.88, bottom=0.06, left=0.07, right=0.97)
+
+    # -----------------------------------------------------------------------
+    # Row 0: FT biases (baseline only)
+    # -----------------------------------------------------------------------
+    gs_inner0 = GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0, 0], hspace=0.08)
+
+    ax_top = fig.add_subplot(gs_inner0[0])
+    fb      = ft_data['ft_bias'].astype(np.int32)
+    bmax    = max(abs(int(fb.min())), abs(int(fb.max())), 1)
+    b_bins  = np.linspace(-bmax * 1.05, bmax * 1.05, 80)
+    ax_top.hist(fb, bins=b_bins, color='steelblue', alpha=0.75, density=True)
+    ax_top.set_title('FT biases (1024 int16)', fontsize=9, fontweight='bold')
+    ax_top.set_ylabel('density', fontsize=8)
+    ax_top.tick_params(labelbottom=False, labelsize=7)
+    ax_top.text(0.98, 0.90, nnue_name, transform=ax_top.transAxes,
+                fontsize=7, ha='right', va='top', color='steelblue')
+
+    ax_bot = fig.add_subplot(gs_inner0[1], sharex=ax_top)
+    if 'ft_bias_learned' in upd:
+        fb_learned = upd['ft_bias_learned'].astype(np.float32)
+        ax_bot.hist(fb_learned, bins=b_bins, color='lightcoral', alpha=0.75, density=True)
+        ax_bot.text(0.98, 0.90, tdleaf_name, transform=ax_bot.transAxes,
+                    fontsize=7, ha='right', va='top', color='firebrick')
+    else:
+        ax_bot.text(0.5, 0.5, 'FT biases not trained\n(v3 or older .tdleaf.bin)',
+                    transform=ax_bot.transAxes, fontsize=8,
+                    ha='center', va='center', color='gray', style='italic')
+    ax_bot.set_ylabel('density', fontsize=8)
+    ax_bot.tick_params(labelsize=7)
+
+    # Col 1: FT bias delta distribution (v4) or feature index coverage (v3/fallback)
+    ax1 = fig.add_subplot(gs[0, 1])
+    if 'ft_bias_learned' in upd:
+        fb_learned = upd['ft_bias_learned']
+        delta_b    = fb_learned - ft_data['ft_bias'].astype(np.float32)
+        dmax  = max(abs(float(delta_b.min())), abs(float(delta_b.max())), 0.1)
+        d_bins = np.linspace(-dmax * 1.05, dmax * 1.05, 80)
+        ax1.hist(delta_b, bins=d_bins, color='coral', alpha=0.85)
+        n_nz = int(np.sum(np.abs(delta_b) > 0.5))
+        ax1.set_title(f'FT biases\nΔ learned − baseline  ({n_nz}/{HALF_DIMS} shifted)',
+                      fontsize=9)
+        ax1.set_ylabel('count', fontsize=8)
+        ax1.axvline(0, color='k', linewidth=0.9, linestyle='--')
+        ax1.set_xlabel('Δ value', fontsize=8)
+    elif has_v3:
+        fi_arr = upd['ft_fi']
+        ax1.hist(fi_arr, bins=60, color='steelblue', alpha=0.80)
+        ax1.set_title(f'FT weights\nTrained feature indices ({n_ft_rows:,}/{FT_INPUTS:,})',
+                      fontsize=9)
+        ax1.set_ylabel('count', fontsize=8)
+        ax1.set_xlabel('feature index', fontsize=8)
+    else:
+        ax1.text(0.5, 0.5, 'No v3/v4 training data\nin .tdleaf.bin',
+                 transform=ax1.transAxes, fontsize=9, ha='center', va='center', color='gray')
+        ax1.set_title('FT biases\nDelta distribution', fontsize=9)
+    ax1.tick_params(labelsize=7)
+
+    # Col 2: FT bias update count (v4) or per-feature max update count (v3/fallback)
+    ax2 = fig.add_subplot(gs[0, 2])
+    if 'ft_bias_learned_cnt' in upd:
+        cnt_nz = upd['ft_bias_learned_cnt']
+        cnt_nz = cnt_nz[cnt_nz > 0]
+        if len(cnt_nz):
+            ax2.hist(cnt_nz, bins=40, color='mediumseagreen', alpha=0.80)
+            ax2.set_title('FT biases\nUpdate count distribution (>0)', fontsize=9)
+            ax2.set_ylabel('count', fontsize=8)
+            ax2.set_xlabel('update count', fontsize=8)
+        else:
+            ax2.text(0.5, 0.5, 'No bias updates yet', transform=ax2.transAxes,
+                     fontsize=9, ha='center', va='center', color='gray')
+            ax2.set_title('FT biases\nUpdate count distribution', fontsize=9)
+    elif has_v3 and 'ft_w_cnt' in upd:
+        max_cnts = upd['ft_w_cnt'].max(axis=1)
+        ax2.hist(max_cnts, bins=40, color='mediumseagreen', alpha=0.80)
+        ax2.set_title('FT weights\nMax update count per feature row', fontsize=9)
+        ax2.set_ylabel('count', fontsize=8)
+        ax2.set_xlabel('max updates', fontsize=8)
+    else:
+        ax2.text(0.5, 0.5, 'No v3/v4 training data', transform=ax2.transAxes,
+                 fontsize=9, ha='center', va='center', color='gray')
+        ax2.set_title('FT biases\nUpdate count distribution', fontsize=9)
+    ax2.tick_params(labelsize=7)
+
+    # -----------------------------------------------------------------------
+    # Row 1: FT weights
+    # -----------------------------------------------------------------------
+    gs_inner1 = GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1, 0], hspace=0.08)
+
+    # Top panel: baseline (if --ft-weights loaded)
+    ax_top1 = fig.add_subplot(gs_inner1[0])
+    if has_ft_baseline:
+        fw_base = ft_data['ft_w'].astype(np.int32)
+        fmax    = max(abs(int(fw_base.min())), abs(int(fw_base.max())), 1)
+        fw_bins = np.linspace(-fmax * 1.05, fmax * 1.05, 80)
+        ax_top1.hist(fw_base.ravel(), bins=fw_bins, color='steelblue', alpha=0.75, density=True)
+        ax_top1.text(0.98, 0.90, nnue_name, transform=ax_top1.transAxes,
+                     fontsize=7, ha='right', va='top', color='steelblue')
+    else:
+        fw_bins = None
+        ax_top1.text(0.5, 0.5, 'Baseline not loaded\n(use --ft-weights)',
+                     transform=ax_top1.transAxes, fontsize=8,
+                     ha='center', va='center', color='gray', style='italic')
+    ax_top1.set_title('FT weights (22528×1024 int16)', fontsize=9, fontweight='bold')
+    ax_top1.set_ylabel('density', fontsize=8)
+    ax_top1.tick_params(labelbottom=False, labelsize=7)
+
+    # Bottom panel: learned distribution for dirty rows
+    ax_bot1 = fig.add_subplot(gs_inner1[1],
+                               sharex=ax_top1 if has_ft_baseline else None)
+    if has_v3 and 'ft_w' in upd:
+        fw_learned = upd['ft_w'].ravel()
+        if fw_bins is None:
+            fw_max_l = max(abs(float(fw_learned.min())), abs(float(fw_learned.max())), 1.0)
+            fw_bins_l = np.linspace(-fw_max_l * 1.05, fw_max_l * 1.05, 80)
+        else:
+            fw_bins_l = fw_bins
+        ax_bot1.hist(fw_learned, bins=fw_bins_l, color='lightcoral', alpha=0.75, density=True)
+        ax_bot1.text(0.98, 0.90, tdleaf_name, transform=ax_bot1.transAxes,
+                     fontsize=7, ha='right', va='top', color='firebrick')
+    else:
+        ax_bot1.text(0.5, 0.5, 'No FT weight training data',
+                     transform=ax_bot1.transAxes, fontsize=8,
+                     ha='center', va='center', color='gray', style='italic')
+    ax_bot1.set_ylabel('density', fontsize=8)
+    ax_bot1.set_xlabel('weight value', fontsize=8)
+    ax_bot1.tick_params(labelsize=7)
+
+    # Col 1: Delta (if both available) else learned distribution
+    ax3 = fig.add_subplot(gs[1, 1])
+    if has_v3 and 'ft_w' in upd and has_ft_baseline:
+        fi_arr   = upd['ft_fi']
+        baseline = ft_data['ft_w'].reshape(FT_INPUTS, HALF_DIMS)[fi_arr].ravel().astype(np.float32)
+        learned  = upd['ft_w'].ravel()
+        delta    = learned - baseline
+        dmax     = max(abs(float(delta.min())), abs(float(delta.max())), 0.1)
+        d_bins   = np.linspace(-dmax * 1.05, dmax * 1.05, 80)
+        ax3.hist(delta, bins=d_bins, color='coral', alpha=0.85)
+        n_nz = int(np.sum(np.abs(delta) > 0.5))
+        ax3.set_title(f'FT weights\nΔ learned − baseline  ({n_nz:,} shifted)', fontsize=9)
+        ax3.set_ylabel('count', fontsize=8)
+        ax3.axvline(0, color='k', linewidth=0.9, linestyle='--')
+    elif has_v3 and 'ft_w' in upd:
+        fw_learned = upd['ft_w'].ravel()
+        fw_max_l   = max(abs(float(fw_learned.min())), abs(float(fw_learned.max())), 1.0)
+        fw_bins_l  = np.linspace(-fw_max_l * 1.05, fw_max_l * 1.05, 80)
+        ax3.hist(fw_learned, bins=fw_bins_l, color='coral', alpha=0.85, density=True)
+        ax3.set_title(f'FT weights\nLearned distribution ({n_ft_rows:,} rows)', fontsize=9)
+        ax3.set_ylabel('density', fontsize=8)
+    else:
+        ax3.text(0.5, 0.5, 'No FT training data', transform=ax3.transAxes,
+                 fontsize=9, ha='center', va='center', color='gray')
+        ax3.set_title('FT weights\nDelta distribution', fontsize=9)
+    ax3.set_xlabel('Δ value', fontsize=8)
+    ax3.tick_params(labelsize=7)
+
+    # Col 2: Update count distribution (non-zero counts)
+    ax4 = fig.add_subplot(gs[1, 2])
+    if has_v3 and 'ft_w_cnt' in upd:
+        cnt_nz = upd['ft_w_cnt'].ravel()
+        cnt_nz = cnt_nz[cnt_nz > 0]
+        if len(cnt_nz):
+            ax4.hist(cnt_nz, bins=40, color='mediumseagreen', alpha=0.80)
+            ax4.set_title('FT weights\nUpdate count distribution (>0)', fontsize=9)
+            ax4.set_ylabel('count', fontsize=8)
+            ax4.set_xlabel('update count', fontsize=8)
+        else:
+            ax4.text(0.5, 0.5, 'No weight updates recorded',
+                     transform=ax4.transAxes, fontsize=9, ha='center', va='center', color='gray')
+            ax4.set_title('FT weights\nUpdate count distribution', fontsize=9)
+    else:
+        ax4.text(0.5, 0.5, 'No v3 training data', transform=ax4.transAxes,
+                 fontsize=9, ha='center', va='center', color='gray')
+        ax4.set_title('FT weights\nUpdate count distribution', fontsize=9)
+    ax4.tick_params(labelsize=7)
+
+    if save:
+        fig.savefig('ft_compare_overview.png', dpi=150)
+        print("Saved ft_compare_overview.png")
+    return fig
+
+
+def plot_psqt_overview(orig, upd, ft_data, save):
+    """
+    Page 3: PSQT weight distributions.
+    Single row: col 0 split (baseline/learned), col 1 delta distribution,
+    col 2 per-bucket mean delta bar chart.
+    """
+    from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+
+    nnue_name   = orig.get('_name', 'original .nnue')
+    tdleaf_name = upd.get('_name',  'updated .tdleaf.bin')
+
+    n_ft_rows = upd.get('n_ft_rows', None)
+    has_v3    = n_ft_rows is not None and n_ft_rows > 0
+
+    fig = plt.figure(figsize=(16, 6))
+    fig.suptitle(f'PSQT weight comparison\n'
+                 f'blue = {nnue_name}   red = {tdleaf_name}   orange = delta',
+                 fontsize=11)
+
+    gs = GridSpec(1, 3, figure=fig,
+                  wspace=0.35,
+                  top=0.82, bottom=0.14, left=0.07, right=0.97)
+
+    pw_base = ft_data['psqt_w']   # [FT_INPUTS, PSQT_BKTS] int32
+
+    # --- col 0: split — baseline (top) / learned (bottom) ---
+    gs_inner = GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[0, 0], hspace=0.08)
+
+    ax_top = fig.add_subplot(gs_inner[0])
+    pb_flat = pw_base.ravel().astype(np.int64)
+    p_max   = max(abs(int(pb_flat.min())), abs(int(pb_flat.max())), 1)
+    p_bins  = np.linspace(-p_max * 1.05, p_max * 1.05, 80)
+    ax_top.hist(pb_flat, bins=p_bins, color='steelblue', alpha=0.75, density=True)
+    ax_top.set_title('PSQT weights (22528×8 int32)', fontsize=9, fontweight='bold')
+    ax_top.set_ylabel('density', fontsize=8)
+    ax_top.tick_params(labelbottom=False, labelsize=7)
+    ax_top.text(0.98, 0.90, nnue_name, transform=ax_top.transAxes,
+                fontsize=7, ha='right', va='top', color='steelblue')
+
+    ax_bot = fig.add_subplot(gs_inner[1], sharex=ax_top)
+    if has_v3 and 'psqt_w' in upd:
+        ps_flat = upd['psqt_w'].ravel()
+        ax_bot.hist(ps_flat, bins=p_bins, color='lightcoral', alpha=0.75, density=True)
+        ax_bot.text(0.98, 0.90, tdleaf_name, transform=ax_bot.transAxes,
+                    fontsize=7, ha='right', va='top', color='firebrick')
+    else:
+        ax_bot.text(0.5, 0.5, 'No PSQT training data', transform=ax_bot.transAxes,
+                    fontsize=8, ha='center', va='center', color='gray', style='italic')
+    ax_bot.set_ylabel('density', fontsize=8)
+    ax_bot.set_xlabel('weight value (int32 units)', fontsize=8)
+    ax_bot.tick_params(labelsize=7)
+
+    # --- col 1: delta distribution ---
+    ax1 = fig.add_subplot(gs[0, 1])
+    if has_v3 and 'psqt_w' in upd:
+        fi_arr     = upd['ft_fi']
+        baseline_d = pw_base[fi_arr].astype(np.float32).ravel()
+        learned_d  = upd['psqt_w'].ravel()
+        delta      = learned_d - baseline_d
+        dmax   = max(abs(float(delta.min())), abs(float(delta.max())), 0.1)
+        d_bins = np.linspace(-dmax * 1.05, dmax * 1.05, 80)
+        ax1.hist(delta, bins=d_bins, color='coral', alpha=0.85)
+        n_nz = int(np.sum(np.abs(delta) > 0.5))
+        ax1.set_title(f'PSQT weights\nΔ learned − baseline  ({n_nz:,} shifted)', fontsize=9)
+        ax1.set_ylabel('count', fontsize=8)
+        ax1.axvline(0, color='k', linewidth=0.9, linestyle='--')
+    else:
+        ax1.text(0.5, 0.5, 'No PSQT training data', transform=ax1.transAxes,
+                 fontsize=9, ha='center', va='center', color='gray')
+        ax1.set_title('PSQT weights\nDelta distribution', fontsize=9)
+    ax1.set_xlabel('Δ value (int32 units)', fontsize=8)
+    ax1.tick_params(labelsize=7)
+
+    # --- col 2: per-bucket mean delta bar chart ---
+    ax2 = fig.add_subplot(gs[0, 2])
+    x = np.arange(PSQT_BKTS)
+    if has_v3 and 'psqt_w' in upd:
+        fi_arr     = upd['ft_fi']
+        baseline_b = pw_base[fi_arr].astype(np.float32)    # [n_ft_rows, PSQT_BKTS]
+        delta_b    = upd['psqt_w'] - baseline_b             # [n_ft_rows, PSQT_BKTS]
+        mean_delta = delta_b.mean(axis=0)
+        std_delta  = delta_b.std(axis=0)
+        ax2.bar(x, mean_delta, yerr=std_delta, color='mediumseagreen', alpha=0.80,
+                capsize=4, error_kw={'linewidth': 1})
+        ax2.axhline(0, color='k', linewidth=0.7, linestyle='--')
+        ax2.set_title(f'PSQT weights\nMean Δ per bucket (±1σ)', fontsize=9)
+        ax2.set_ylabel('mean Δ (int32 units)', fontsize=8)
+    else:
+        means = pw_base.mean(axis=0)
+        stds  = pw_base.std(axis=0)
+        ax2.bar(x, means, yerr=stds, color='steelblue', alpha=0.80, capsize=4,
+                error_kw={'linewidth': 1})
+        ax2.axhline(0, color='k', linewidth=0.7, linestyle='--')
+        ax2.set_title('PSQT weights\nBaseline mean per bucket (±1σ)', fontsize=9)
+        ax2.set_ylabel('mean weight (int32 units)', fontsize=8)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels([f'B{i}' for i in x], fontsize=7)
+    ax2.set_xlabel('bucket', fontsize=8)
+    ax2.tick_params(labelsize=7)
+
+    if save:
+        fig.savefig('psqt_compare_overview.png', dpi=150)
+        print("Saved psqt_compare_overview.png")
+    return fig
+
+
 def plot_fc1_per_stack(orig, upd, save):
     """2×4 figure: FC1 weight distributions per stack (orig vs updated overlay)."""
     fig, axes = plt.subplots(2, 4, figsize=(16, 7))
@@ -798,6 +1119,8 @@ def main():
     print_summary(orig, upd, ft_data)
 
     plot_overview(orig, upd, args.save)
+    plot_ft_overview(orig, upd, ft_data, args.save)
+    plot_psqt_overview(orig, upd, ft_data, args.save)
 
     if not args.no_show:
         plt.show()

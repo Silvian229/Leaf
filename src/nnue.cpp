@@ -1151,6 +1151,13 @@ static bool     *ft_dirty         = nullptr;  // which feature rows are non-zero
 static float    *ft_delta_f32     = nullptr;  // FT delta since last file sync [FT_INPUTS×HALF_DIMS]
 static float    *psqt_delta_f32   = nullptr;  // PSQT delta since last file sync [FT_INPUTS×PSQT_BKTS]
 
+// FT bias float shadow, gradient accumulator, update count, and delta (all NNUE_HALF_DIMS).
+// Static (16 KB total) — no heap allocation needed.
+static float    ft_biases_f32 [NNUE_HALF_DIMS] = {};
+static float    grad_ft_bias  [NNUE_HALF_DIMS] = {};
+static uint32_t ft_bias_cnt   [NNUE_HALF_DIMS] = {};
+static float    ft_bias_delta [NNUE_HALF_DIMS] = {};
+
 // ---------------------------------------------------------------------------
 // nnue_init_zero_weights — fresh-start FC initialisation + material-only PSQT
 //
@@ -1249,8 +1256,8 @@ void nnue_init_zero_weights()
     memset(grad_l2_b, 0, sizeof(grad_l2_b));
 
     // ---- FT biases: random init from N(mean,std) — gives non-zero accumulator ----
-    // FT biases have no float shadow and are not updated by TDLeaf; this is a
-    // fixed warm-start so SqrCReLU outputs (and FC0 weight gradients) are non-zero.
+    // The float shadow (ft_biases_f32) is initialised from these int16 values in
+    // nnue_init_fp32_weights; TDLeaf trains both the int16 and float copies.
     if (ft_biases) {
         std::normal_distribution<float> ft_b_dist(INIT_FT_B_MEAN, INIT_FT_B_STD);
         for (int k = 0; k < NNUE_HALF_DIMS; k++) {
@@ -1395,7 +1402,13 @@ void nnue_init_fp32_weights()
     if (ft_delta_f32)   memset(ft_delta_f32,   0, ft_sz   * sizeof(float));
     if (psqt_delta_f32) memset(psqt_delta_f32, 0, psqt_sz * sizeof(float));
 
-    printf("NNUE TDLeaf: FP32 weights initialised (%d stacks + FT/PSQT)\n", NNUE_LAYER_STACKS);
+    // FT bias float shadow: initialise from the loaded int16 array.
+    for (int d = 0; d < NNUE_HALF_DIMS; d++) ft_biases_f32[d] = (float)ft_biases[d];
+    memset(grad_ft_bias,  0, sizeof(grad_ft_bias));
+    memset(ft_bias_cnt,   0, sizeof(ft_bias_cnt));
+    memset(ft_bias_delta, 0, sizeof(ft_bias_delta));
+
+    printf("NNUE TDLeaf: FP32 weights initialised (%d stacks + FT/PSQT + FT biases)\n", NNUE_LAYER_STACKS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1610,6 +1623,11 @@ void nnue_accumulate_gradients(const NNUEActivations &act, float grad_scale)
                 NNUE_PSQT_LR_SCALE * g_psqt_diff * psqt_sign;
         }
     }
+
+    // FT bias gradient: ∂loss/∂ft_biases[d] = Σ_persp g_acc[persp][d]
+    // Both perspectives share the same bias vector, so gradients sum across them.
+    for (int d = 0; d < NNUE_HALF_DIMS; d++)
+        grad_ft_bias[d] += NNUE_FT_BIAS_LR_SCALE * (g_acc[0][d] + g_acc[1][d]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1711,6 +1729,18 @@ void nnue_apply_gradients()
             ft_dirty[fi] = false;
         }
     }
+
+    // FT bias update: applied every game (biases shared across all positions).
+    for (int d = 0; d < NNUE_HALF_DIMS; d++) {
+        if (grad_ft_bias[d] == 0.0f) continue;
+        float dw = clamp_grad(ft_biases_f32[d], grad_ft_bias[d]);
+        ft_biases_f32[d] -= dw;
+        ft_bias_delta[d] -= dw;
+        ft_bias_cnt[d]++;
+        grad_ft_bias[d] = 0.0f;
+        ft_biases[d] = (int16_t)std::max(-32767.0f,
+                                std::min( 32767.0f, roundf(ft_biases_f32[d])));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1784,7 +1814,7 @@ void nnue_requantize_fc()
 // ---------------------------------------------------------------------------
 // nnue_save_fc_weights / nnue_load_fc_weights — companion .tdleaf.bin file
 //
-// Version 3 layout (current):
+// Version 4 layout (current):
 //   magic(4) + version(4)
 //   8 stacks × FC block (same as v2):
 //     FC0 biases:  float32[L0_SIZE]            × TDLEAF_SCALE  (64 B)
@@ -1811,12 +1841,18 @@ void nnue_requantize_fc()
 // TDLEAF_SCALE = 128: stores w_f32 × 128 so sub-integer drift survives sessions.
 // On load, divide by TDLEAF_SCALE to restore w_f32 exactly.
 //
+// Version 4 additions (current):
+//   FT bias section (appended after sparse FT/PSQT rows):
+//     float32[HALF_DIMS] × TDLEAF_SCALE: FT bias values         (4096 B)
+//     uint32_t[HALF_DIMS]: FT bias update counts                 (4096 B)
+//
+// Version 3 (legacy): FC + sparse FT/PSQT, no FT bias section.  Still readable.
 // Version 2 (legacy): FC block only, no FT/PSQT section.  Still readable.
 // Version 1 (legacy): int32 biases + int8 weights, no counts.  Still readable.
 // ---------------------------------------------------------------------------
 static const float    TDLEAF_SCALE   = 128.0f;
 static const uint32_t TDLEAF_MAGIC   = 0x544D4C46u; // "TMLF"
-static const uint32_t TDLEAF_VERSION = 3u;
+static const uint32_t TDLEAF_VERSION = 4u;
 
 // ---------------------------------------------------------------------------
 // tdleaf_acquire_lock / tdleaf_release_lock
@@ -1862,7 +1898,7 @@ bool nnue_save_fc_weights(const char *path)
         bool ok = (fread(&magic, 4, 1, cur) == 1 &&
                    fread(&version, 4, 1, cur) == 1 &&
                    magic == TDLEAF_MAGIC &&
-                   (version == TDLEAF_VERSION || version == 2u));
+                   (version == TDLEAF_VERSION || version == 3u || version == 2u));
         if (ok) {
             // FC section: float32 × TDLEAF_SCALE per weight, then uint32 counts.
             // Merge: shadow = file_value + our_delta; count = max(file, ours).
@@ -1897,8 +1933,8 @@ bool nnue_save_fc_weights(const char *path)
                   && merge_f(l2_weights_f32[s], delta_l2_w[s], l2_weights_cnt[s], NNUE_L2_PADDED)
                   && merge_cnt(l2_weights_cnt[s], NNUE_L2_PADDED);
             }
-            // FT/PSQT sparse section (v3 only).
-            if (ok && version == TDLEAF_VERSION && ft_weights_f32) {
+            // FT/PSQT sparse section (v3/v4).
+            if (ok && (version == TDLEAF_VERSION || version == 3u) && ft_weights_f32) {
                 uint32_t n_ft_rows = 0;
                 if (fread(&n_ft_rows, sizeof(uint32_t), 1, cur) == 1) {
                     float tmp_w[NNUE_HALF_DIMS];
@@ -1934,6 +1970,19 @@ bool nnue_save_fc_weights(const char *path)
                         }
                     }
                 }
+                // FT bias section (v4 only).
+                if (version == TDLEAF_VERSION) {
+                    float tmp_b[NNUE_HALF_DIMS];
+                    uint32_t tmp_bc[NNUE_HALF_DIMS];
+                    if (fread(tmp_b,  sizeof(float),    NNUE_HALF_DIMS, cur) == (size_t)NNUE_HALF_DIMS &&
+                        fread(tmp_bc, sizeof(uint32_t), NNUE_HALF_DIMS, cur) == (size_t)NNUE_HALF_DIMS) {
+                        for (int d = 0; d < NNUE_HALF_DIMS; d++) {
+                            ft_biases_f32[d] = tmp_b[d] / TDLEAF_SCALE + ft_bias_delta[d];
+                            ft_bias_delta[d] = 0.0f;
+                            if (tmp_bc[d] > ft_bias_cnt[d]) ft_bias_cnt[d] = tmp_bc[d];
+                        }
+                    }
+                }
             }
         }
         fclose(cur);
@@ -1958,6 +2007,7 @@ bool nnue_save_fc_weights(const char *path)
         memset(delta_l2_b, 0, sizeof(delta_l2_b));
         if (ft_delta_f32)   memset(ft_delta_f32,   0, (size_t)NNUE_FT_INPUTS * NNUE_HALF_DIMS  * sizeof(float));
         if (psqt_delta_f32) memset(psqt_delta_f32, 0, (size_t)NNUE_FT_INPUTS * NNUE_PSQT_BKTS * sizeof(float));
+        memset(ft_bias_delta, 0, sizeof(ft_bias_delta));
     }
 
     // ---- Write merged content to a temp file, then atomically rename ----
@@ -2049,6 +2099,14 @@ bool nnue_save_fc_weights(const char *path)
         }
     }
 
+    // FT bias section (v4): float32[HALF_DIMS] × TDLEAF_SCALE + uint32_t[HALF_DIMS] counts.
+    {
+        float tmp_b[NNUE_HALF_DIMS];
+        for (int d = 0; d < NNUE_HALF_DIMS; d++) tmp_b[d] = ft_biases_f32[d] * TDLEAF_SCALE;
+        fwrite(tmp_b,       sizeof(float),    NNUE_HALF_DIMS, f);
+        fwrite(ft_bias_cnt, sizeof(uint32_t), NNUE_HALF_DIMS, f);
+    }
+
     fclose(f);
 
     // Atomic rename: temp → final (replaces the old file in one syscall).
@@ -2102,8 +2160,8 @@ bool nnue_load_fc_weights(const char *path)
         return true;
     }
 
-    // ---- Version 2 / 3: float32 × TDLEAF_SCALE + uint32 counts ----
-    if (version != 2u && version != TDLEAF_VERSION) {
+    // ---- Version 2 / 3 / 4: float32 × TDLEAF_SCALE + uint32 counts ----
+    if (version != 2u && version != 3u && version != TDLEAF_VERSION) {
         fprintf(stderr, "TDLeaf: unsupported version %u in %s\n", version, path);
         fclose(f); tdleaf_release_lock(lock_fd); return false;
     }
@@ -2134,9 +2192,9 @@ bool nnue_load_fc_weights(const char *path)
              ru(l2_weights_cnt[s], NNUE_L2_PADDED);
     }
 
-    // Sparse FT/PSQT section (v3 only).
+    // Sparse FT/PSQT section (v3/v4).
     int n_ft_loaded = 0;
-    if (ok && version == TDLEAF_VERSION && ft_weights_f32) {
+    if (ok && (version == 3u || version == TDLEAF_VERSION) && ft_weights_f32) {
         uint32_t n_ft_rows = 0;
         if (fread(&n_ft_rows, sizeof(uint32_t), 1, f) != 1) { ok = false; }
         float tmp_w[NNUE_HALF_DIMS];
@@ -2167,6 +2225,23 @@ bool nnue_load_fc_weights(const char *path)
         }
     }
 
+    // FT bias section (v4 only).
+    if (ok && version == TDLEAF_VERSION) {
+        float tmp_b[NNUE_HALF_DIMS];
+        uint32_t tmp_bc[NNUE_HALF_DIMS];
+        if (fread(tmp_b,  sizeof(float),    NNUE_HALF_DIMS, f) == (size_t)NNUE_HALF_DIMS &&
+            fread(tmp_bc, sizeof(uint32_t), NNUE_HALF_DIMS, f) == (size_t)NNUE_HALF_DIMS) {
+            for (int d = 0; d < NNUE_HALF_DIMS; d++) {
+                ft_biases_f32[d] = tmp_b[d] / TDLEAF_SCALE;
+                ft_biases[d]     = (int16_t)std::max(-32767.0f,
+                                            std::min( 32767.0f, roundf(ft_biases_f32[d])));
+                ft_bias_cnt[d]   = tmp_bc[d];
+            }
+        } else {
+            ok = false;
+        }
+    }
+
     fclose(f);
     tdleaf_release_lock(lock_fd);
     if (!ok) {
@@ -2188,11 +2263,18 @@ bool nnue_load_fc_weights(const char *path)
     memset(delta_l2_b, 0, sizeof(delta_l2_b));
     if (ft_delta_f32)   memset(ft_delta_f32,   0, (size_t)NNUE_FT_INPUTS * NNUE_HALF_DIMS  * sizeof(float));
     if (psqt_delta_f32) memset(psqt_delta_f32, 0, (size_t)NNUE_FT_INPUTS * NNUE_PSQT_BKTS * sizeof(float));
+    memset(grad_ft_bias,  0, sizeof(grad_ft_bias));
+    memset(ft_bias_delta, 0, sizeof(ft_bias_delta));
+    // ft_bias_cnt and ft_biases_f32 are populated from file in v4; leave them.
+    // For v2/v3 files, ft_biases_f32 was already initialised by nnue_init_fp32_weights.
     nnue_requantize_fc();
     if (version == TDLEAF_VERSION)
-        printf("TDLeaf: loaded v3 weights from %s (%d FT rows)\n", path, n_ft_loaded);
+        printf("TDLeaf: loaded v4 weights from %s (%d FT rows)\n", path, n_ft_loaded);
+    else if (version == 3u)
+        printf("TDLeaf: loaded v3 weights from %s (%d FT rows, will upgrade to v4 on next save)\n",
+               path, n_ft_loaded);
     else
-        printf("TDLeaf: loaded v2 FC weights from %s (will upgrade to v3 on next save)\n", path);
+        printf("TDLeaf: loaded v2 FC weights from %s (will upgrade to v4 on next save)\n", path);
     return true;
 }
 
