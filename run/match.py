@@ -51,6 +51,8 @@ def main():
                              "with -i > 1 an iteration number is appended before the extension")
     parser.add_argument("--openings", default=None, metavar="FILE",
                         help="Openings file (.epd or .pgn); randomly ordered")
+    parser.add_argument("--fischer-random", action="store_true", default=False,
+                        help="Use Chess960 / Fischer Random starting positions (-variant fischerandom)")
     parser.add_argument("--ponder", action="store_true", default=False,
                         help="Enable pondering (default: off)")
     parser.add_argument("--wait", type=int, default=0, metavar="MS",
@@ -100,6 +102,7 @@ def main():
         "-engine", f"cmd={exe1}", f"name={name1}", "proto=xboard", f"dir={run_dir}",
         "-engine", f"cmd={exe2}", f"name={name2}", "proto=xboard", f"dir={run_dir}",
         "-each",   f"tc={args.time_control}", *(["ponder"] if args.ponder else []),
+        *([ "-variant", "fischerandom"] if args.fischer_random else []),
         "-concurrency", str(args.concurrency),
         "-rounds", rounds_arg,
         "-recover",
@@ -121,7 +124,8 @@ def main():
     print(f"Match:       {name1}  vs  {name2}")
     print(f"Games:       {args.games}   Iterations: {args.iterations}   "
           f"Concurrency: {args.concurrency}   TC: {args.time_control}   "
-          f"Ponder: {'on' if args.ponder else 'off'}")
+          f"Ponder: {'on' if args.ponder else 'off'}   "
+          f"Fischer Random: {'on' if args.fischer_random else 'off'}")
     if args.openings:
         print(f"Openings:    {args.openings}")
     print()
