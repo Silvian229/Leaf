@@ -125,7 +125,7 @@ python3 match.py EXchess_vA EXchess_vB -n 200 -c 4 -tc 10+0.1
 
 ## License
 
-GNU General Public License.  See source headers for details.
+GNU General Public License.  See [`src/license.txt`](src/license.txt) for the full license text.
 
 ---
 
