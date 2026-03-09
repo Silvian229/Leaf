@@ -441,7 +441,7 @@ static bool write_leb128_i32(FILE *f, const int32_t *buf, size_t count)
 // arrays (reflecting any zeroing or TDLeaf training), encoded as SLEB128.
 // The architecture description is updated:
 //   - Normal (trained): original description + " Trained by EXchess TDLeaf"
-//   - Zero-initialized: "Trained by EXchess TDLeaf" (replaces original)
+//   - Zero-initialized: "Random init + basic piece values" (replaces original)
 // ---------------------------------------------------------------------------
 bool nnue_write_nnue(const char *dst_path)
 {
@@ -478,7 +478,7 @@ bool nnue_write_nnue(const char *dst_path)
     // Build new description.
     char new_desc[4096];
     if (nnue_zero_initialized || !orig_desc[0])
-        snprintf(new_desc, sizeof(new_desc), "Trained by EXchess TDLeaf");
+        snprintf(new_desc, sizeof(new_desc), "Random init + basic piece values");
     else
         snprintf(new_desc, sizeof(new_desc), "%s Trained by EXchess TDLeaf", orig_desc);
     uint32_t new_desc_size = (uint32_t)strlen(new_desc);
