@@ -317,6 +317,7 @@ move tree_search::search(position p, int time_limit, int T, game_rec *gr)
 
   last_depth = 1;
   g_last = 0;
+  id_score_count = 0;
 
   //------------------------------------------------------------------
   //  Generate a root move list
@@ -450,6 +451,11 @@ move tree_search::search(position p, int time_limit, int T, game_rec *gr)
     }
 
     g_last = g;
+    // push this depth's score into the ID history ring (oldest dropped when full)
+    if (id_score_count < TD_ID_HIST) id_score_count++;
+    for (int _i = 0; _i < id_score_count - 1; _i++)
+        id_scores[_i] = id_scores[_i + 1];
+    id_scores[id_score_count - 1] = g;
     last_depth = max_ply;
     last_best_move = tdata[0].pc[0][0].t;
 

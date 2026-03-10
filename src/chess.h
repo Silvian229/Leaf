@@ -405,7 +405,10 @@ struct tree_search {
   int root_tb_score, root_wtm;
   int start_depth;              // start depth of search  
   int last_depth;               // depth of previous search
-  int g_last;                   // last returned score of search 
+  int g_last;                   // last returned score of search
+  static const int TD_ID_HIST = 4; // number of ID depth scores to track
+  int id_scores[TD_ID_HIST];   // last TD_ID_HIST iterative-deepening scores (cp)
+  int id_score_count;          // valid entries in id_scores (0..TD_ID_HIST)
   int h_id;                     // flag for hash id (identifies current search)
   int max_search_depth;         // search depth limit set by xboard   
   int max_search_time;          // search time limit set by xboard  

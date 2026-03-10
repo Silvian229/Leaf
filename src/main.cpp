@@ -537,7 +537,9 @@ void make_move()
                          game.ts.tdata[0].n[0].acc,
                          game.ts.tdata[0].pc[0],
                          game.ts.g_last,
-                         (bool)game.pos.wtm);
+                         (bool)game.pos.wtm,
+                         game.ts.id_scores,
+                         game.ts.id_score_count);
      }
 #endif
      //---------------------------

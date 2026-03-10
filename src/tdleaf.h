@@ -55,6 +55,16 @@ static const int   TDLEAF_MIN_PLIES       = 8;      // skip games shorter than t
 // fraction of the weight's current magnitude (min ref = 1.0 so near-zero weights
 // can still move).  Set to 1.0 to disable.  Applied to both FC and FT layers.
 static const float TDLEAF_MAX_UPDATE_FRAC = 1.0f; //0.10f;  // max 10% change per update
+// Approach 1 — TD error clipping.
+// When the white-POV score change between consecutive moves exceeds this
+// threshold (centipawns), the (d[t+1]−d[t]) contribution to the eligibility
+// trace is scaled down proportionally.  Set to a large value to disable.
+static const float TDLEAF_SCORE_CLIP_CP  = 200.0f;
+// Approach 2 — iterative-deepening score stability weight.
+// w_t = 1 / (1 + id_score_variance / TDLEAF_ID_VAR_SIGMA2)
+// Expressed in cp²: 10000 corresponds to a 100 cp std-dev reference.
+// Larger values are more tolerant of ID score instability.
+static const float TDLEAF_ID_VAR_SIGMA2  = 10000.0f;
 
 // ---------------------------------------------------------------------------
 // Per-ply record: accumulator snapshot + search score
@@ -65,6 +75,7 @@ struct TDRecord {
     int     score_stm;                 // search score (centipawns, side-to-move POV)
     int     stack;                     // layer stack index used (piece_count-1)/4
     bool    wtm;                       // White to move at this position
+    float   id_score_variance;         // variance of last N ID depth scores (cp²); 0 if < 2 depths
     // Active feature indices at the leaf position (indexed by actual perspective 0=BLACK,1=WHITE).
     // Used for FT and PSQT gradient backprop.
     int     ft_idx[2][NNUE_MAX_FT_PER_PERSP];
@@ -98,7 +109,9 @@ void tdleaf_record_ply(TDGameRecord &rec,
                        const NNUEAccumulator &root_acc,
                        const move *pv,
                        int score_root_stm,
-                       bool root_wtm);
+                       bool root_wtm,
+                       const int *id_scores,
+                       int id_score_count);
 
 // Run the full TDLeaf(λ) update after a game ends.
 // result: game outcome from White's perspective (1.0=White wins, 0.5=draw, 0.0=Black wins).

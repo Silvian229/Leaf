@@ -20,7 +20,9 @@ void tdleaf_record_ply(TDGameRecord &rec,
                        const NNUEAccumulator &root_acc,
                        const move *pv,
                        int score_root_stm,
-                       bool root_wtm)
+                       bool root_wtm,
+                       const int *id_scores,
+                       int id_score_count)
 {
     if (rec.n_plies >= MAX_GAME_PLY) return;  // safety guard
 
@@ -68,14 +70,28 @@ void tdleaf_record_ply(TDGameRecord &rec,
     }
 #endif
 
+    // Compute variance of the last N iterative-deepening scores.
+    float id_var = 0.0f;
+    if (id_score_count >= 2) {
+        float id_mean = 0.0f;
+        for (int i = 0; i < id_score_count; i++) id_mean += id_scores[i];
+        id_mean /= id_score_count;
+        for (int i = 0; i < id_score_count; i++) {
+            float delta = id_scores[i] - id_mean;
+            id_var += delta * delta;
+        }
+        id_var /= id_score_count;
+    }
+
     TDRecord &r = rec.plies[rec.n_plies++];
     memcpy(r.acc[0],  acc_a.acc[0],  NNUE_HALF_DIMS  * sizeof(int16_t));
     memcpy(r.acc[1],  acc_a.acc[1],  NNUE_HALF_DIMS  * sizeof(int16_t));
     memcpy(r.psqt[0], acc_a.psqt[0], NNUE_PSQT_BKTS * sizeof(int32_t));
     memcpy(r.psqt[1], acc_a.psqt[1], NNUE_PSQT_BKTS * sizeof(int32_t));
-    r.score_stm = leaf_score_stm;
-    r.wtm       = leaf_wtm;
-    r.stack     = (pc - 1) / 4;
+    r.score_stm        = leaf_score_stm;
+    r.wtm              = leaf_wtm;
+    r.stack            = (pc - 1) / 4;
+    r.id_score_variance = id_var;
 
     // Enumerate active features at the leaf position for FT/PSQT backprop.
     // Indices are by actual perspective (0=BLACK, 1=WHITE) matching halfkav2_feature().
@@ -108,11 +124,12 @@ void tdleaf_update_after_game(TDGameRecord &rec, float result, const char *save_
     // 1. Convert scores to White-POV sigmoid values d[t] ∈ (0,1)
     // -----------------------------------------------------------------------
     static float d[MAX_GAME_PLY];
+    static float score_w_cp[MAX_GAME_PLY];
     for (int t = 0; t < T; t++) {
-        float score_w = rec.plies[t].wtm
+        score_w_cp[t] = rec.plies[t].wtm
                         ?  (float)rec.plies[t].score_stm
                         : -(float)rec.plies[t].score_stm;
-        d[t] = 1.0f / (1.0f + expf(-score_w / TDLEAF_K));
+        d[t] = 1.0f / (1.0f + expf(-score_w_cp[t] / TDLEAF_K));
     }
 
     // -----------------------------------------------------------------------
@@ -122,8 +139,13 @@ void tdleaf_update_after_game(TDGameRecord &rec, float result, const char *save_
     // -----------------------------------------------------------------------
     static float e[MAX_GAME_PLY];
     e[T - 1] = result - d[T - 1];
-    for (int t = T - 2; t >= 0; t--)
-        e[t] = (d[t + 1] - d[t]) + TDLEAF_LAMBDA * e[t + 1];
+    for (int t = T - 2; t >= 0; t--) {
+        float delta_d  = d[t + 1] - d[t];
+        float delta_cp = fabsf(score_w_cp[t + 1] - score_w_cp[t]);
+        if (delta_cp > TDLEAF_SCORE_CLIP_CP && delta_cp > 0.0f)
+            delta_d *= TDLEAF_SCORE_CLIP_CP / delta_cp;
+        e[t] = delta_d + TDLEAF_LAMBDA * e[t + 1];
+    }
 
     // -----------------------------------------------------------------------
     // 3. For each ply, run FP32 forward pass + accumulate gradients
@@ -139,7 +161,9 @@ void tdleaf_update_after_game(TDGameRecord &rec, float result, const char *save_
         // positional is from STM perspective; score_white = (wtm ? +1 : -1) * positional * scale.
         // nnue_apply_gradients does w -= grad, so negate for wtm to get w += gradient.
         float wtm_sign = rec.plies[t].wtm ? -1.0f : 1.0f;
-        float grad_scale = TDLEAF_ALPHA * e[t] * sig_grad * cp_factor * wtm_sign;
+        // ID stability weight: down-weight positions whose score fluctuated across ID depths.
+        float id_weight = 1.0f / (1.0f + rec.plies[t].id_score_variance / TDLEAF_ID_VAR_SIGMA2);
+        float grad_scale = TDLEAF_ALPHA * e[t] * sig_grad * cp_factor * wtm_sign * id_weight;
 
         if (grad_scale == 0.0f) continue;
 
