@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="200" viewBox="0 0 500 200">
+  <defs>
+    <linearGradient id="gold-bar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#c8a96e"/>
+      <stop offset="50%"  stop-color="#e8c97e"/>
+      <stop offset="100%" stop-color="#c8a96e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="500" height="200" fill="#080808" stroke="#1a1a1a" stroke-width="1"/>
+  <!-- Gold top accent -->
+  <rect x="0" y="0" width="500" height="2" fill="url(#gold-bar)"/>
+
+  <!-- Decorative rings (right side) -->
+  <g transform="translate(435,100)" fill="none" stroke="#c8a96e" opacity="0.07">
+    <circle cx="0" cy="0" r="80" stroke-width="1"/>
+    <circle cx="0" cy="0" r="60" stroke-width="1"/>
+    <circle cx="0" cy="0" r="40" stroke-width="1"/>
+    <circle cx="0" cy="0" r="20" stroke-width="1"/>
+    <line x1="0" y1="-80" x2="0"   y2="80"  stroke-width="0.5"/>
+    <line x1="-80" y1="0" x2="80"  y2="0"   stroke-width="0.5"/>
+  </g>
+
+  <!-- "CHESS ENGINE" label -->
+  <text x="50" y="62"
+        font-family="'Courier New', Courier, monospace"
+        font-size="10" font-weight="normal"
+        letter-spacing="5" fill="#c8a96e">CHESS ENGINE</text>
+
+  <!-- "EPOCH" main title -->
+  <text x="46" y="148"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="88" font-weight="bold"
+        letter-spacing="-2" fill="#f0e8d0">EP<tspan fill="#c8a96e">O</tspan>CH</text>
+
+  <!-- Divider line -->
+  <line x1="50" y1="162" x2="100" y2="162" stroke="#c8a96e" stroke-width="1" opacity="0.6"/>
+
+  <!-- Tagline -->
+  <text x="50" y="182"
+        font-family="'Courier New', Courier, monospace"
+        font-size="9" letter-spacing="3" fill="#555">A NEW ERA OF PLAY</text>
+
+  <!-- Queen watermark -->
+  <text x="450" y="190"
+        font-family="Georgia, serif"
+        font-size="30" fill="#c8a96e" opacity="0.15"
+        text-anchor="middle">&#9819;</text>
+</svg>

@@ -1,5 +1,9 @@
 # Epoch
 
+<p align="center">
+  <img src="logos/epoch.svg" alt="Epoch Chess Engine" width="500"/>
+</p>
+
 **Epoch** is an open-source chess engine written in C++ by Daniel C. Homan, an astrophysicist at Denison University in Granville, Ohio.  Originally developed under the name **EXchess**, development began in the late 1990s and the engine was actively maintained and released through early 2017.  After a long hiatus, the project was restarted in 2026 with significant new features developed in collaboration with [Claude Code](https://claude.ai/claude-code) (Anthropic) and renamed to Epoch.
 
 ---
