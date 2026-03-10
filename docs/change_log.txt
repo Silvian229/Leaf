@@ -78,7 +78,7 @@ TDLeaf(λ) Online Learning (NNUE=1 TDLEAF=1):
                .tdleaf.bin bumped to version 4: appends float32[1024]×128 + uint32[1024]
                FT bias section after the sparse FT/PSQT rows (+8 KB).
                v2/v3 files still load; v3 files upgrade automatically on first save.
-             -- FT/PSQT/FC weight visualisation added to compare_fc_weights.py:
+             -- FT/PSQT/FC weight visualisation added to compare_nnue_learning.py:
                Page 2 (FT): bias dist, learned bias dist (v4), delta, update counts,
                feature index coverage, FT weight dist (baseline/learned), delta, update counts.
                Page 3 (PSQT): baseline/learned dist, delta dist, per-bucket mean-delta bar.
@@ -117,6 +117,12 @@ Infrastructure:
              -- Archived unused src/ files (MinGW/old release build scripts, FLTK
                GUI source) to archives/src/.
              -- Added docs/NNUE.md and docs/TDLEAF.md as implementation references.
+2026_03_09 -- Reorganised repository: all Python scripts moved to scripts/ at repo root.
+               run/ and learn/ retain symlinks to scripts/ for in-place invocation.
+               compare_fc_weights.py renamed to compare_nnue_learning.py.
+               tdleaf_selfplay.py kept in scripts/ with no symlinks (not in active use).
+               docs/ created at repo root; holds NNUE.md, TDLEAF.md, TODO.md,
+               change_log.txt, license.txt (moved from src/).
 
 -------------- old change log below -------------------
 

@@ -1,0 +1,1 @@
+../scripts/compare_nnue_learning.py

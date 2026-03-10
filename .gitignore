@@ -1,11 +1,13 @@
 # Ignore everything by default
 *
 
-# Except src/, docs/, run/*.py, run/*.txt, learn/, and this file
+# Except src/, docs/, scripts/, run/*.py, run/*.txt, learn/, and this file
 !src/
 !src/**
 !docs/
 !docs/**
+!scripts/
+!scripts/**
 !.gitignore
 !README.md
 !run/

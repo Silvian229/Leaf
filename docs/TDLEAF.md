@@ -339,6 +339,6 @@ perl comp.pl train_fresh_ro NNUE=1 NNUE_NET=nn-fresh.nnue TDLEAF=1 TDLEAF_READON
 
 ## Self-Play Driver
 
-`run/tdleaf_selfplay.py` manages engine vs engine games, captures results, and runs the
-trained binary continuously.  `run/compare_fc_weights.py` compares a `.tdleaf.bin` file
-against the baseline `.nnue` and shows FC, FT, and PSQT weight statistics.
+`scripts/tdleaf_selfplay.py` manages engine vs engine games, captures results, and runs the
+trained binary continuously.  `scripts/compare_nnue_learning.py` compares a `.tdleaf.bin`
+file against the baseline `.nnue` and shows FC, FT, and PSQT weight statistics.

@@ -1,1 +1,0 @@
-../run/compare_fc_weights.py

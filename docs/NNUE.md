@@ -226,9 +226,9 @@ All NNUE layers (FC0/FC1/FC2, FT biases, FT weights, PSQT) can be trained via
 TDLeaf(λ) self-play.  See `docs/TDLEAF.md` for the full reference.
 Build with `NNUE=1 TDLEAF=1`.
 
-The `learn/training_run.py` interactive script manages a full training run: net
+The `scripts/training_run.py` interactive script manages a full training run: net
 selection or random init, building both a training and a read-only binary, running
-N iterations of M-game self-play matches via `run/match.py`, tracking cumulative game
+N iterations of M-game self-play matches via `scripts/match.py`, tracking cumulative game
 counts across sessions, and exporting the trained weights to a new `.nnue` file named
 `<net_base>-<total_games>g.nnue`.  Fischer Random (Chess960) is the default opening
 randomisation method.
