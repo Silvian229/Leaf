@@ -21,7 +21,8 @@
 #      persists across multiple runs on the same network.
 #
 # All working files (.nnue, .tdleaf.bin, .games, binaries, output .nnue) are
-# kept in learn/ for easy access.  run/ is only used for comp.pl and match.py.
+# kept in learn/ for easy access.  run/ is used for match.py; src/comp.pl is
+# invoked directly for builds.
 #
 
 import datetime
@@ -32,6 +33,7 @@ import sys
 
 learn_dir = os.path.dirname(os.path.abspath(__file__))
 run_dir   = os.path.normpath(os.path.join(learn_dir, "../run"))
+src_dir   = os.path.normpath(os.path.join(learn_dir, "../src"))
 
 
 # ---------------------------------------------------------------------------
@@ -67,9 +69,10 @@ def write_game_count(sidecar_path, count):
 
 
 def build_binary(version, flags):
-    """Invoke comp.pl from run_dir, then move the resulting binary to learn_dir."""
-    cmd = ["perl", "comp.pl", version] + flags + ["OVERWRITE"]
-    print(f"  $ perl comp.pl {' '.join([version] + flags)} OVERWRITE")
+    """Invoke src/comp.pl (cwd=run_dir), then move the resulting binary to learn_dir."""
+    comp_pl = os.path.join(src_dir, "comp.pl")
+    cmd = ["perl", comp_pl, version] + flags + ["OVERWRITE"]
+    print(f"  $ perl src/comp.pl {' '.join([version] + flags)} OVERWRITE")
     result = subprocess.run(cmd, cwd=run_dir)
     if result.returncode != 0:
         return False
