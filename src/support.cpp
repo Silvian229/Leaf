@@ -242,7 +242,7 @@ void position::print_move(move pmove, char mstring[10], ts_thread_data *temps)
               add_file = 1;
             }
             if(FILE(pfrom) == FILE(list.mv[z].m.b.from)) { // || ics) {
-              char dummy2[2];
+              char dummy2[4];
               snprintf(dummy2, sizeof(dummy2), "%i", (RANK(pfrom)+1));
               strcat(dummy,dummy2);
               z = list.count;

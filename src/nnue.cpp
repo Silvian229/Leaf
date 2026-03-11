@@ -192,7 +192,7 @@ static bool read_leb128_i32(FILE *f, int32_t *buf, size_t count)
 
 static uint32_t read_u32(FILE *f) {
     uint32_t v = 0;
-    fread(&v, 4, 1, f);
+    (void)fread(&v, 4, 1, f);
     return v;
 }
 
@@ -460,12 +460,12 @@ bool nnue_write_nnue(const char *dst_path)
             return false;
         }
         uint32_t orig_desc_size;
-        fread(&version,        sizeof(uint32_t), 1, src);
-        fread(&file_hash,      sizeof(uint32_t), 1, src);
-        fread(&orig_desc_size, sizeof(uint32_t), 1, src);
+        (void)fread(&version,        sizeof(uint32_t), 1, src);
+        (void)fread(&file_hash,      sizeof(uint32_t), 1, src);
+        (void)fread(&orig_desc_size, sizeof(uint32_t), 1, src);
         if (orig_desc_size > 0 && orig_desc_size < sizeof(orig_desc))
-            fread(orig_desc, 1, orig_desc_size, src);
-        fread(&ft_hash, sizeof(uint32_t), 1, src);
+            (void)fread(orig_desc, 1, orig_desc_size, src);
+        (void)fread(&ft_hash, sizeof(uint32_t), 1, src);
         fclose(src);
     } else {
         // No source file (--init-nnue mode): use nn-ad9b42354671.nnue header constants.
