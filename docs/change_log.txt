@@ -1,5 +1,19 @@
 Changes since 2017_12_24
 
+2026_03_11 -- Flavor B epoch-based replay for TDLeaf(λ) (TDLEAF=1).
+               After each game, the completed TDGameRecord is pushed into a
+               static ring buffer (TDLEAF_REPLAY_BUF_N=8 games, ~36 MB BSS).
+               tdleaf_replay() then runs TDLEAF_REPLAY_K additional passes over
+               all buffered games: score_stm is refreshed from the current
+               quantized weights (nnue_evaluate_acc_raw) before each pass, then
+               gradients are accumulated across all games and applied once per pass.
+               New files/functions: nnue_evaluate_acc_raw (nnue.cpp/h),
+               tdleaf_accumulate_game, tdleaf_refresh_scores, tdleaf_replay (tdleaf.cpp/h).
+               tdleaf_update_after_game refactored to call tdleaf_accumulate_game.
+               Build flags: TDLEAF_REPLAY_K (default 2), TDLEAF_REPLAY_BUF_N (default 8).
+               Ablation results: K=2 best; K=3 marginally worse; K=0 much worse; K=6 large regression.
+               Default set to K=2 in define.h.
+
 2026_03_11 -- PSQT initialization: uniform random per piece type (--init-nnue).
                Replace fixed 100cp/piece PSQT prior with independent uniform draws
                per feature, one per piece type.  Ranges (centipawns → int32 units):

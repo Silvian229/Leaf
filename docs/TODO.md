@@ -44,9 +44,22 @@ only the forward and backward NNUE passes at the fixed stored positions.
   the large reduction in compute cost vs. re-running the full search (Flavor A),
   which would cost the same as replaying all games × number of epochs.
 
-**Recommendation:** implement Flavor B with K configurable at build or run
-time.  Run a 500-game ablation comparing K=1 (current), K=2, and K=4 on the
-same starting network and measure Elo gain per wall-clock hour.
+**✓ Implemented (2026-03-11).** Flavor B is live with `TDLEAF_REPLAY_K` and
+`TDLEAF_REPLAY_BUF_N=8` configurable at build or run time.
+
+**Ablation results:**
+
+| K | Result |
+|---|--------|
+| 0 | Baseline (no replay) — much weaker |
+| 2 | **Best — adopted as default** |
+| 3 | Slightly worse than K=2 |
+| 6 | Large regression |
+
+K=2 was marginally better than K=3 and substantially better than K=0.  K=6
+caused a large regression, consistent with the expected instability when stored
+positions become stale relative to the current network.  The default is set to
+K=2 in `src/define.h`.
 
 ### Horizon noise mitigation — ablation testing plan
 
