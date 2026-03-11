@@ -1354,13 +1354,20 @@ void nnue_init_zero_weights()
         }
     }
 
-    // ---- FT weights: zero; PSQT: 100 cp/piece equivalent ----
-    // score_cp = (psqt_diff/2)*100/5776
-    // For 1 extra own piece of type pt: psqt_diff = 2*V → score = V*100/5776.
-    // Set V(pawn)=5776 → 100 cp; scale other pieces proportionally.
-    // Each feature fi gets +V if the piece is own (pside==persp), -V if opponent.
-    // This way psqt[stm]-psqt[opp] = 2*V*N for N extra own pieces of that type.
-    static const float PSQT_VAL[7] = {0.f, 5776.f, 17328.f, 17328.f, 28880.f, 51984.f, 0.f};
+    // ---- FT weights: random; PSQT: uniform random per piece type ----
+    // Conversion: V = cp * 5776 / 100.  PSQT is side-to-move based:
+    //   own pieces (pside==persp)  → +V  (positive contribution to stm score)
+    //   opp pieces (pside!=persp)  → -V  (negative contribution to stm score)
+    // Each feature draws its magnitude independently from Uniform[LO, HI].
+    // Ranges in internal int32 units (cp * 5776 / 100):
+    //   Pawn   80-120 cp → [4621,  6931]
+    //   Knight 250-450cp → [14440, 26001]
+    //   Bishop 250-450cp → [14440, 26001]
+    //   Rook   400-700cp → [23104, 40432]
+    //   Queen  900-1400cp→ [51984, 80864]
+    //   King   0 cp      → [0,     0]
+    static const float PSQT_RND_LO[7] = { 0.f,  4621.f, 14440.f, 14440.f, 23104.f, 51984.f, 0.f };
+    static const float PSQT_RND_HI[7] = { 0.f,  6931.f, 26001.f, 26001.f, 40432.f, 80864.f, 0.f };
     if (ft_weights_f32) {
         size_t ft_sz   = (size_t)NNUE_FT_INPUTS * NNUE_HALF_DIMS;
         size_t psqt_sz = (size_t)NNUE_FT_INPUTS * NNUE_PSQT_BKTS;
@@ -1390,7 +1397,8 @@ void nnue_init_zero_weights()
                         for (int pside = 0; pside < 2; pside++) {
                             int fi = halfkav2_feature(persp, ksq, psq, ptype, pside);
                             if (fi < 0 || fi >= NNUE_FT_INPUTS) continue;
-                            float val = (pside == persp ? 1.f : -1.f) * PSQT_VAL[ptype];
+                            std::uniform_real_distribution<float> ud(PSQT_RND_LO[ptype], PSQT_RND_HI[ptype]);
+                            float val = (pside == persp ? 1.f : -1.f) * ud(rng);
                             for (int b = 0; b < NNUE_PSQT_BKTS; b++)
                                 psqt_weights_f32[fi * NNUE_PSQT_BKTS + b] = val;
                         }
@@ -1403,7 +1411,7 @@ void nnue_init_zero_weights()
     // Sync all int8/int16/int32 inference arrays from the zeroed float shadows.
     nnue_requantize_fc();
     nnue_zero_initialized = true;
-    printf("NNUE TDLeaf: FC+FT initialised random N(mean,std) from SF15.1; PSQT=100cp/pawn\n");
+    printf("NNUE TDLeaf: FC+FT initialised random N(mean,std) from SF15.1; PSQT=uniform-random per piece type\n");
 }
 
 // ---------------------------------------------------------------------------
