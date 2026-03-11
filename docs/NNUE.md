@@ -19,7 +19,7 @@ perl comp.pl 2026_03_07a NNUE=1
 ```
 
 The network file currently defaults to `nn-ad9b42354671.nnue` (Stockfish 15.1 release, 47 MB) which must be in
-the same directory as the binary, or in the directory from which the engine is launched.  
+the same directory as the binary, or in the directory from which the engine is launched. 
 It can be downloaded from: https://github.com/official-stockfish/networks. Other compatitible networks can be 
 specified with the compile variable NNUE_NET=filename.
 
@@ -194,7 +194,7 @@ instead of 0, dramatically improving the positional component of the evaluation.
 
 | Binary | NPS | Notes |
 |--------|-----|-------|
-| classical (no NNUE) | 1,645,247 | baseline |
+| EXchess_classic (no NNUE) | 1,645,247 | baseline |
 | v2026_03_01b | 528,348 | NNUE, no optimizations |
 | v2026_03_01c | 645,539 | + score hash (+22%) |
 | v2026_03_01e | 691,200 | + score hash + vdotq FC0 (+31% total) |
@@ -214,8 +214,8 @@ Self-play matches at 1 min + 0.1 s/move, 100 games each:
 
 | Match-up | Score | Notes |
 |----------|-------|-------|
-| v2026_03_02g vs classical | 10.0% (0W 2D 18L) | old code, broken scales |
-| v2026_03_06z vs classical | 22.5% (4W 1D 15L) | fixed lazy acc, split scale |
+| v2026_03_02g vs EXchess_classic | 10.0% (0W 2D 18L) | old code, broken scales |
+| v2026_03_06z vs EXchess_classic | 22.5% (4W 1D 15L) | fixed lazy acc, split scale |
 | v2026_03_07a vs v2026_03_06z | **98.0% (96W 4D 0L)** | own-king + SqrCReLU + unified scale |
 | **v2026_03_07a vs classical** | **96.0% (92W 8D 0L)** | current best |
 
