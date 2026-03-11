@@ -177,7 +177,7 @@ Bayesian Elo ratings — fresh-260309-testing.pgn
 
 Rank  Name                            Elo     ±  Games   Score   Oppo  Draws
 ----------------------------------------------------------------------------
-   1  EXchess_classical             +1031   213    500    100%    +66     0%
+   1  EXchess_classic             +1031   213    500    100%    +66     0%
    2  Epoch_vnn-fresh-260309-4000g    +66    17   2612     68%    -11    10%
    3  EXchess_classic_material         -8    56    112     40%    +66    24%
    4  Epoch_vnn-fresh-260309-2000g    -79    15   2000     68%   -236    18%

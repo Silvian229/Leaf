@@ -26,7 +26,7 @@ The network is a statistically plausible but chess-naïve starting point — it 
 | Training format | Self-play: `Epoch_vtrain` (learning) vs `Epoch_vtrain_ro` (read-only) |
 | Positions | Fischer Random (Chess960), random starting position each game |
 | Opening book | None |
-| Tablebases | Disabled (wrong path in `search.par` — intentional for this run) |
+| Tablebases | Disabled |
 | Time control | 3+0.05 s/move |
 | Concurrency | 5 simultaneous games |
 | Total training games | 4,000 |
@@ -51,7 +51,7 @@ After training, a round-robin test tournament was run among all five network sna
 
 **Reference engines:**
 
-- **`EXchess_classical`** — the classical hand-crafted Epoch eval; the strong-reference ceiling for this run
+- **`EXchess_classic`** — the classical hand-crafted Epoch eval; the strong-reference ceiling for this run
 - **`EXchess_classic_material`** — a material-only classical build (`MATERIAL_ONLY=1`); the weak-reference floor
 
 ---
@@ -64,7 +64,7 @@ Computed with `scripts/bayeselo_ratings.py` (BayesElo, maximum-likelihood).  Rat
 
 | Rank | Engine | Elo | ± | Games | Score | Oppo | Draws |
 |-----:|--------|----:|--:|------:|------:|-----:|------:|
-| 1 | EXchess_classical | +1031 | 213 | 500 | 100% | +66 | 0% |
+| 1 | EXchess_classic | +1031 | 213 | 500 | 100% | +66 | 0% |
 | 2 | Epoch_vnn-fresh-260309-4000g | +66 | 17 | 2,612 | 68% | −11 | 10% |
 | 3 | EXchess_classic_material | −8 | 56 | 112 | 40% | +66 | 24% |
 | 4 | Epoch_vnn-fresh-260309-2000g | −79 | 15 | 2,000 | 68% | −236 | 18% |
@@ -94,9 +94,9 @@ Improvement is roughly linear in game count over this range, with no sign of pla
 | 4000g | 1000g | 195 | 33 | 22 | 84.6% |
 | 4000g | 2000g | 141 | 64 | 45 | 69.2% |
 | 4000g | EXchess_classic_material | 43 | 19 | 40 | 51.5% |
-| EXchess_classical | 4000g | 250 | 0 | 1 | 100.0% |
+| EXchess_classic | 4000g | 250 | 0 | 1 | 100.0% |
 
-The 4000g network is approximately equal to the material-only classical eval and has a large positive score against all earlier snapshots.  It remains far below the classical eval — `EXchess_classical` loses only a single game in 500 against the 4000g network.
+The 4000g network is approximately equal to the material-only classical eval and has a large positive score against all earlier snapshots.  It remains far below the classical eval — `EXchess_classic` loses only a single game in 500 against the 4000g network.
 
 ---
 
@@ -106,7 +106,7 @@ The 4000g network is approximately equal to the material-only classical eval and
 
 2. **Crossing the material-only threshold.** At roughly 2000–4000 games the network surpasses a pure material eval, meaning it has begun to learn meaningful positional patterns from self-play.
 
-3. **Large gap to classical eval.** The 4000g net is ~965 Elo below `EXchess_classical` in this pool.  This is expected: the classical eval encodes decades of chess knowledge; a self-trained network at this game count is not expected to match it.  Closing this gap is the long-term goal.
+3. **Large gap to classical eval.** The 4000g net is ~965 Elo below `EXchess_classic` in this pool.  This is expected: the classical eval encodes decades of chess knowledge; a self-trained network at this game count is not expected to match it.  Closing this gap is the long-term goal.
 
 4. **Fischer Random as training distribution.** Using random starting positions removes opening-book effects and ensures the network is exposed to a wide variety of piece configurations from move 1.  It is not yet known whether a network trained on Fischer Random positions will transfer well to standard chess, or whether standard starting-position training would be faster.
 
