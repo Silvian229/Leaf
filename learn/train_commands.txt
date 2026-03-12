@@ -2,7 +2,7 @@
 #   --init-nnue  creates FC/FT/PSQT from N(mean,std) measured from SF15.1
 #   --write-nnue writes the result (required with --init-nnue)
 #perl comp.pl init_nnue NNUE=1 TDLEAF=1 OVERWRITE
-#./Epoch_vinit_nnue --init-nnue --write-nnue nn-fresh.nnue
+#./Leaf_vinit_nnue --init-nnue --write-nnue nn-fresh.nnue
 
 # Step 2: build two training versions pointing to the new net
 perl comp.pl train_fresh NNUE=1 NNUE_NET=nn-fresh.nnue TDLEAF=1 OVERWRITE
@@ -16,8 +16,8 @@ perl comp.pl test_fresh NNUE=1 NNUE_NET=nn-fresh.nnue OVERWRITE
 # NOTE: we are playing each version against itself, including the trained weights to that point 
 #  Each new game in the set updates the train_zeroed but not train_zeroed_ro version.
 #
-python3 tdleaf_selfplay.py Epoch_vtrain_fresh --depth 6 --engine2 Epoch_vtrain_fresh_ro --depth2 6 --move-timeout 10 -n 500
-python match.py ../learn/Epoch_vtrain_fresh ../learn/Epoch_vtrain_fresh_ro -c 5 -tc 0:03+0.05 --wait 500 -n 500
+python3 tdleaf_selfplay.py Leaf_vtrain_fresh --depth 6 --engine2 Leaf_vtrain_fresh_ro --depth2 6 --move-timeout 10 -n 500
+python match.py ../learn/Leaf_vtrain_fresh ../learn/Leaf_vtrain_fresh_ro -c 5 -tc 0:03+0.05 --wait 500 -n 500
 
 
 # Four, examine the learning compared to the original
