@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logos/epoch.svg" alt="Leaf Chess Engine" width="500"/>
+  <img src="logos/leaf.svg" alt="Leaf Chess Engine" width="500"/>
 </p>
 
 # Leaf
