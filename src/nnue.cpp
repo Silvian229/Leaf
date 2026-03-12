@@ -1246,24 +1246,23 @@ static float    ft_bias_delta [NNUE_HALF_DIMS] = {};
 // ---------------------------------------------------------------------------
 // nnue_init_zero_weights — fresh-start FC initialisation + material-only PSQT
 //
-// FC layers are initialised with random values drawn from truncated normal
+// Weights are initialised with random values drawn from truncated normal
 // distributions whose parameters were measured from nn-ad9b42354671.nnue
 // (Stockfish 15.1).  Rejection sampling is used for int8 weights: samples
 // outside [-127, 127] are discarded and redrawn, avoiding the boundary
 // spikes produced by simple clipping.
 //
-// Using realistic random init (rather than zero) ensures activation functions
-// produce non-zero outputs from game 1, so gradients can flow to all weights.
+// All biases (FC0/FC1/FC2 and FT) are initialised to zero.  Random N(μ,σ)
+// bias init from an unrelated SF15.1 distribution provides no useful prior
+// and adds noise that TDLeaf must overcome via the near-cancelling per-game
+// gradient structure.  FT weights already break symmetry across dimensions,
+// so zero FT biases still yield varied SqrCReLU activations from game 1.
 //
-// Measured statistics from nn-ad9b42354671.nnue:
-//   FT biases   (1024  int16):        mean=  +3.34  std=   96.48
+// Measured weight statistics from nn-ad9b42354671.nnue:
 //   FT weights  (22528×1024 int16):   mean=  -0.71  std=   44.41
 //   FC0 weights (16×1024 int8):       mean= +0.2368 std=   8.4252
-//   FC0 biases  (16 int32):           mean=+332.10  std=2936.56
 //   FC1 weights (32×32  int8):        mean= -1.0989 std=  18.3019
-//   FC1 biases  (32 int32):           mean=-400.08  std=2510.30
 //   FC2 weights (32     int8):        mean= +1.0977 std=  76.3777  (ref only)
-//   FC2 biases  (1 int32/stack):      mean=+1241.75 std=1218.46
 //
 // NOTE: FC2 weight std is intentionally set LOWER than the measured SF15.1
 // value (76.38).  The reference net's wide, near-bimodal FC2 distribution is
@@ -1274,32 +1273,22 @@ static float    ft_bias_delta [NNUE_HALF_DIMS] = {};
 // identical-weight pathologies.  Training will push FC2 weights to their
 // learned magnitudes naturally.
 //
-// FT biases and weights must be non-zero so the accumulator is non-zero,
-// giving non-zero SqrCReLU outputs and thus non-zero FC0 weight gradients.
 // Both ft_weights (int16, used for inference) and ft_weights_f32 (float,
 // used for backprop) are initialised together; nnue_apply_gradients later
 // keeps them in sync for dirty feature rows.
 // ---------------------------------------------------------------------------
-#define INIT_FT_B_MEAN    3.3398f
-#define INIT_FT_B_STD    96.4788f
 #define INIT_FT_W_MEAN   -0.7119f
 #define INIT_FT_W_STD    44.4149f
 #define INIT_FC0_W_MEAN   0.2368f
 #define INIT_FC0_W_STD    8.4252f
-#define INIT_FC0_B_MEAN 332.1016f
-#define INIT_FC0_B_STD 2936.5617f
 #define INIT_FC1_W_MEAN  -1.0989f
 #define INIT_FC1_W_STD   18.3019f
-#define INIT_FC1_B_MEAN -400.0820f
-#define INIT_FC1_B_STD  2510.2978f
 #define INIT_FC2_W_MEAN   1.0977f
 #define INIT_FC2_W_STD   30.0000f   // reduced from measured 76.38; see note above
-#define INIT_FC2_B_MEAN 1241.7500f
-#define INIT_FC2_B_STD  1218.4550f
 
 void nnue_init_zero_weights()
 {
-    // ---- FC layers: random init from measured Stockfish 15.1 distributions ----
+    // ---- FC layers: weights random from measured SF15.1 distributions; biases zero ----
     std::mt19937 rng(42);  // fixed seed for reproducibility
     // Truncated normal for int8 weights: reject samples outside [-127, 127]
     // rather than clipping, to avoid artificial density spikes at the boundaries.
@@ -1309,23 +1298,19 @@ void nnue_init_zero_weights()
         do { v = d(rng); } while (v < -127.f || v > 127.f);
         return v;
     };
-    auto rnd_b = [&](float mean, float std) -> float {
-        std::normal_distribution<float> d(mean, std);
-        return d(rng);
-    };
 
     for (int s = 0; s < NNUE_LAYER_STACKS; s++) {
         for (int i = 0; i < NNUE_L0_SIZE * NNUE_L0_INPUT; i++)
             l0_weights_f32[s][i] = rnd_w(INIT_FC0_W_MEAN, INIT_FC0_W_STD);
         for (int i = 0; i < NNUE_L0_SIZE; i++)
-            l0_biases_f32[s][i]  = rnd_b(INIT_FC0_B_MEAN, INIT_FC0_B_STD);
+            l0_biases_f32[s][i]  = 0.0f;
         for (int i = 0; i < NNUE_L1_SIZE * NNUE_L1_PADDED; i++)
             l1_weights_f32[s][i] = rnd_w(INIT_FC1_W_MEAN, INIT_FC1_W_STD);
         for (int i = 0; i < NNUE_L1_SIZE; i++)
-            l1_biases_f32[s][i]  = rnd_b(INIT_FC1_B_MEAN, INIT_FC1_B_STD);
+            l1_biases_f32[s][i]  = 0.0f;
         for (int i = 0; i < NNUE_L2_PADDED; i++)
             l2_weights_f32[s][i] = rnd_w(INIT_FC2_W_MEAN, INIT_FC2_W_STD);
-        l2_bias_f32[s] = rnd_b(INIT_FC2_B_MEAN, INIT_FC2_B_STD);
+        l2_bias_f32[s] = 0.0f;
     }
     memset(l0_weights_cnt, 0, sizeof(l0_weights_cnt));
     memset(l0_biases_cnt,  0, sizeof(l0_biases_cnt));
@@ -1340,19 +1325,11 @@ void nnue_init_zero_weights()
     memset(grad_l2_w, 0, sizeof(grad_l2_w));
     memset(grad_l2_b, 0, sizeof(grad_l2_b));
 
-    // ---- FT biases: random init from N(mean,std) — gives non-zero accumulator ----
-    // The float shadow (ft_biases_f32) is initialised from these int16 values in
-    // nnue_init_fp32_weights; TDLeaf trains both the int16 and float copies.
-    if (ft_biases) {
-        std::normal_distribution<float> ft_b_dist(INIT_FT_B_MEAN, INIT_FT_B_STD);
-        for (int k = 0; k < NNUE_HALF_DIMS; k++) {
-            float v = ft_b_dist(rng);
-            // clip to int16 range (actual SF15.1 range is [-240, +612])
-            if (v < -32767.f) v = -32767.f;
-            if (v >  32767.f) v =  32767.f;
-            ft_biases[k] = (int16_t)v;
-        }
-    }
+    // ---- FT biases: zero init ----
+    // FT weights already break symmetry across dimensions, so zero FT biases
+    // are sufficient to get varied SqrCReLU activations from game 1.
+    if (ft_biases)
+        memset(ft_biases, 0, NNUE_HALF_DIMS * sizeof(int16_t));
 
     // ---- FT weights: random; PSQT: uniform random per piece type ----
     // Conversion: V = cp * 5776 / 100.  PSQT is side-to-move based:
@@ -1411,7 +1388,7 @@ void nnue_init_zero_weights()
     // Sync all int8/int16/int32 inference arrays from the zeroed float shadows.
     nnue_requantize_fc();
     nnue_zero_initialized = true;
-    printf("NNUE TDLeaf: FC+FT initialised random N(mean,std) from SF15.1; PSQT=uniform-random per piece type\n");
+    printf("NNUE TDLeaf: FC+FT weights=random N(mean,std) SF15.1; biases=zero; PSQT=uniform-random per piece type\n");
 }
 
 // ---------------------------------------------------------------------------

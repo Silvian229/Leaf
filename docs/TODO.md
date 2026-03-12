@@ -97,11 +97,11 @@ perl comp.pl train_arm_b NNUE=1 NNUE_NET=nn-start.nnue TDLEAF=1 \
 **After the ablation:** if one approach dominates, drop the other to reduce
 complexity.  If both help, the combined default is confirmed.
 
-### Bias initialisation
-FC biases and FT biases are currently initialised from the SF15.1 distribution (random
-N(μ,σ)).  Consider initialising all biases to 0 and letting TDLeaf learn them from
-scratch — this removes any dependence on the SF15.1 starting point and may converge to
-better values, especially for a freshly-initialised network.
+### ~~Bias initialisation~~ ✓ Implemented (2026-03-11)
+FC biases (FC0/FC1/FC2) and FT biases are now initialised to zero in `--init-nnue` mode.
+Random N(μ,σ) from the SF15.1 distribution provided no useful prior and added noise
+that TDLeaf must overcome via its near-cancelling per-game gradient structure.  FT
+weights still use random init so SqrCReLU activations are non-zero from game 1.
 
 ### Search parameter tuning
 The search's pruning parameters (null-move margins, futility thresholds, aspiration
