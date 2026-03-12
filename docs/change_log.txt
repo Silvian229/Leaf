@@ -7,63 +7,55 @@ Changes since 2017_12_24
                all buffered games: score_stm is refreshed from the current
                quantized weights (nnue_evaluate_acc_raw) before each pass, then
                gradients are accumulated across all games and applied once per pass.
-               New files/functions: nnue_evaluate_acc_raw (nnue.cpp/h),
+               New functions: nnue_evaluate_acc_raw (nnue.cpp/h),
                tdleaf_accumulate_game, tdleaf_refresh_scores, tdleaf_replay (tdleaf.cpp/h).
                tdleaf_update_after_game refactored to call tdleaf_accumulate_game.
                Build flags: TDLEAF_REPLAY_K (default 2), TDLEAF_REPLAY_BUF_N (default 8).
                Ablation results: K=2 best; K=3 marginally worse; K=0 much worse; K=6 large regression.
-               Default set to K=2 in define.h.
+
+2026_03_11 -- TDLeaf horizon noise mitigation: two mechanisms to reduce the influence
+               of tactics beyond the search horizon on gradient updates.
+               Approach 1 — TD error clipping (TDLEAF_SCORE_CLIP_CP):
+               When the white-POV score change between consecutive moves exceeds the
+               threshold, the (d[t+1]-d[t]) eligibility trace contribution is scaled
+               down proportionally.  Direction preserved; only magnitude reduced.
+               Approach 2 — ID score stability weighting (TDLEAF_ID_VAR_SIGMA2):
+               The last TD_ID_HIST=4 ID scores are tracked per search; their variance
+               is stored in TDRecord::id_score_variance and used to soft-weight each
+               ply's gradient by 1/(1 + variance/TDLEAF_ID_VAR_SIGMA2).
+               Both approaches apply in replay passes as well as the live pass.
 
 2026_03_11 -- PSQT initialization: uniform random per piece type (--init-nnue).
-               Replace fixed 100cp/piece PSQT prior with independent uniform draws
-               per feature, one per piece type.  Ranges (centipawns → int32 units):
+               Replaced fixed 100cp/piece PSQT prior with independent uniform draws
+               per piece type.  Ranges (centipawns → int32 units):
                  Pawn   80–120 cp  → [4621,  6931]
                  Knight 250–450 cp → [14440, 26001]
                  Bishop 250–450 cp → [14440, 26001]
                  Rook   400–700 cp → [23104, 40432]
                  Queen  900–1400 cp→ [51984, 80864]
                  King   0 cp       → 0 (fixed)
-               Sign convention preserved: own pieces get +V, opponent pieces -V,
-               consistent with the side-to-move PSQT accumulator convention.
-               Conversion: V = cp × 5776 / 100.
 
 2026_03_11 -- x86-64 performance optimizations.
+               AVX2 SIMD (nnue.cpp): SqrCReLU, FC0, and FC1 hot paths ported to
+               AVX2/SSE4.1 intrinsics.  Fallback chain: NEON → AVX2 → scalar.
+               Hash table cache-line alignment (hash.cpp): aligned_alloc(64) for all
+               four tables; eliminates false sharing on multi-threaded probes.
+               LMR precomputed tables (search.cpp, funct.h): six integer divisions
+               replaced with lmr_d5/d8/d12/mi8 lookup tables, initialized at startup.
+               Build system (comp.pl): added NATIVE=1 flag (-march=native -mtune=native);
+               default Linux build uses -march=x86-64-v3 (portable AVX2 baseline).
+               macOS/ARM fix: comp.pl detects Darwin/ARM and omits -march=x86-64-v3
+               and -mpopcnt (unsupported by Apple clang and ARM targets).
 
-             Build system (src/comp.pl):
-               Added NATIVE=1 flag: compiles with -march=native -mtune=native for
-               maximum performance on the local CPU.  Default build now uses
-               -march=x86-64-v3 (portable AVX2 baseline; Intel Haswell 2013+,
-               AMD Zen 1 2017+) with -mtune=generic.  Both variants add
-               -mpopcnt -funroll-loops -ffast-math -flto -Wno-unused-result.
-               Usage: perl comp.pl <vers> NNUE=1 NATIVE=1
-
-             NNUE AVX2 SIMD (src/nnue.cpp) — resolves "Linux compilation" TODO:
-               Added EPOCH_USE_AVX2 paths alongside existing ARM NEON paths,
-               covering all three hot-path forward-pass kernels:
-               - SqrCReLU (step 1): processes 32 int16/iter via _mm256_mullo_epi16
-                 + _mm256_packs_epi16 (vs 8 for NEON, 1 for scalar).
-               - FC0 dot product (step 2): maddubs+madd idiom emulates vdotq_s32;
-                 all 16 outputs in 2 __m256i accumulators per 4-input block.
-               - FC1 dot product (step 4): SSE4.1 maddubs+madd with 8 __m128i
-                 accumulators matching NEON layout; FC1 weight reordering extended
-                 from __ARM_FEATURE_DOTPROD to also trigger under __AVX2__.
-               Fallback chain: NEON → AVX2 → scalar.
-               EPOCH_USE_AVX2 defined when __AVX2__ is present (enabled by
-               -march=x86-64-v3, -mavx2, or -march=native on AVX2 hardware).
-
-             Hash table cache-line alignment (src/hash.cpp):
-               All four hash table allocations changed from new[]/delete[] to
-               aligned_alloc(64, ...)/free().  hash_bucket is exactly 64 bytes
-               (one x86 cache line); aligned placement eliminates false sharing
-               on multi-threaded hash probes.  align64() helper rounds allocation
-               sizes up to the next 64-byte boundary as required by aligned_alloc.
-
-             LMR precomputed tables (src/search.cpp, src/funct.h):
-               Six inline integer divisions in the LMR reduction logic replaced
-               with lookups into precomputed arrays: lmr_d5[], lmr_d8[],
-               lmr_d12[], lmr_mi8[].  Initialized once at startup via
-               lmr_init_tables() called from open_hash().  No change to
-               reduction amounts or chess logic.
+2026_03_11 -- Removed TRAIN_EVAL compile flag (dead code from legacy eval training era).
+               Added MATERIAL_ONLY compile flag: score_pos() returns raw material balance
+               immediately when MATERIAL_ONLY=1.  Useful as a training baseline.
+             -- Fixed Linux GCC warnings: bare fread() calls cast to (void);
+               dummy2[] buffer widened from 2 to 4 bytes (-Wformat-truncation).
+             -- Scripts: bayeselo_ratings.py accepts multiple PGN files (combined before
+               analysis).  pgn_dedup.py (new): removes duplicate games from PGN files.
+               match.py/training_run.py: --depth1/--depth2 per-engine depth limit options.
+               docs/TRAINING.md (new): first TDLeaf training run results and analysis.
 
 2026_03_09 -- Project renamed from EXchess to Epoch.
                src/EXchess.cc → src/Epoch.cc (unity build entry point).
@@ -72,6 +64,21 @@ Changes since 2017_12_24
                run_exchess.py → run_epoch.py; symlinks in run/ updated.
                All user-visible strings (xboard feature myname, banners,
                player names, TDLeaf .nnue description) updated to Epoch.
+             -- FT bias training added (v4 .tdleaf.bin format).
+               FT biases (1024 int16) now have float shadow, gradient accumulator,
+               update counts, and per-session delta.  NNUE_FT_BIAS_LR_SCALE = 10.0.
+               v2/v3 files still load; upgrade to v4 automatically on first save.
+             -- match.py: gauntlet mode (multiple opponents), persistent PGN, Elo capture.
+               Summary table printed at end: Opponent | Games | W | D | L | Score% | Elo diff.
+             -- Repository reorganised: all Python scripts moved to scripts/ at repo root.
+               compare_fc_weights.py renamed to compare_nnue_learning.py.
+               docs/ created at repo root; holds NNUE.md, TDLEAF.md, TODO.md,
+               change_log.txt, license.txt.
+             -- Fixed .tdleaf.bin save path to use exec_dir; fixed exec_path parse loop limit.
+             -- Added learn/ directory for training runs.
+             -- comp.pl: added OVERWRITE flag.  match.py: added --wait option.
+             -- Archived unused src/ files (MinGW/FLTK GUI source) to archives/src/.
+             -- Added docs/NNUE.md and docs/TDLEAF.md as implementation references.
 
 2026_03_01 to 2026_03_09 -- Major new feature: NNUE evaluation and TDLeaf(λ) online learning.
                New files: src/nnue.h, src/nnue.cpp, src/tdleaf.h, src/tdleaf.cpp.
@@ -86,8 +93,7 @@ NNUE Evaluation (NNUE=1):
                Score formula: (psqt_diff/2 + positional) * 100/5776  (Stockfish 15.1 exact).
                NNUE eval added to score.cpp with score hash probe/store (+22% NPS).
                Lazy incremental accumulator updates at exec_move sites in search.cpp.
-
-2026_03_01 -- NEON optimizations for Apple M1 (arm64):
+             -- NEON optimizations for Apple M1 (arm64):
                FC0: vdotq_s32 with weight reorder ib*64+ob*16+k*4+j layout (+7% NPS).
                FC1: fused dual-activation loop + vdotq reorder (+4% NPS).
                Lazy accumulator fully implemented via nnue_apply_delta (+17% NPS).
@@ -126,130 +132,11 @@ TDLeaf(λ) Online Learning (NNUE=1 TDLEAF=1):
                NNUE_FC_BIAS_LR_SCALE = 1000 in tdleaf.h, applied to all three FC bias
                gradient accumulation lines in nnue_accumulate_gradients.
              -- Concurrent .tdleaf.bin file access: multiple simultaneous Epoch instances
-               (e.g. multi-game self-play) can now share a single .tdleaf.bin safely.
-               Design: per-session delta accumulators (delta_l0_w/b, delta_l1_w/b,
-               delta_l2_w/b, ft_delta_f32, psqt_delta_f32) track weight changes since
-               the last file write.  On each write: acquire LOCK_EX on a companion
-               .tdleaf.bin.lock file, re-read the current .tdleaf.bin, merge
-               (file_value + our_delta) per entry, write merged content to a .tmp file,
-               rename atomically to .tdleaf.bin, release lock.  Reads use LOCK_SH.
-               This ensures each instance's updates survive and do not overwrite
-               concurrent changes from other instances.
-
-2026_03_08 -- Added --init-nnue --write-nnue mode: creates a randomly initialised .nnue
-               from scratch (no source .nnue needed) using N(mean,std) distributions
-               measured from nn-ad9b42354671.nnue for FC layers, N(-0.71,44.41) for FT
-               weights, and signed piece values for PSQT (pawn=5776, knight/bishop=17328,
-               rook=28880, queen=51984).  Enables training from a fresh random network.
-
-2026_03_09 -- FT bias training added (v4 .tdleaf.bin format).
-               FT biases (1024 int16, shared across all positions) now have a float
-               shadow (ft_biases_f32), gradient accumulator (grad_ft_bias), update
-               counts (ft_bias_cnt), and per-session delta (ft_bias_delta).
-               Gradient: grad_ft_bias[d] += NNUE_FT_BIAS_LR_SCALE × (g_acc[0][d] + g_acc[1][d]).
-               NNUE_FT_BIAS_LR_SCALE = 10.0 (tdleaf.h); tune empirically.
-               .tdleaf.bin bumped to version 4: appends float32[1024]×128 + uint32[1024]
-               FT bias section after the sparse FT/PSQT rows (+8 KB).
-               v2/v3 files still load; v3 files upgrade automatically on first save.
-             -- FT/PSQT/FC weight visualisation added to compare_nnue_learning.py:
-               Page 2 (FT): bias dist, learned bias dist (v4), delta, update counts,
-               feature index coverage, FT weight dist (baseline/learned), delta, update counts.
-               Page 3 (PSQT): baseline/learned dist, delta dist, per-bucket mean-delta bar.
-             -- training_run.py: executables no longer include date in name
-               (Epoch_vtrain_<net> / Epoch_vtrain_<net>_ro); Fischer Random
-               now defaults to yes.
-
-Infrastructure:
-2026_03_08 -- Cleanup: moved train_commands.txt from run/ to learn/; added
-               run/verify_fc0.py (Python script to verify Epoch FC0 computation
-               against raw .nnue file, useful for debugging forward-pass accuracy).
-             -- comp.pl: added OVERWRITE flag to skip interactive overwrite prompt.
-             -- match.py: added --wait option (passes -wait MS to cutechess-cli); useful
-               when multiple TDLeaf instances share a .tdleaf.bin and need breathing room
-               between file-lock acquisitions.
-2026_03_09 -- match.py: gauntlet mode (multiple opponents), persistent PGN, Elo capture.
-               engine2 argument → opponents (nargs='+'); more than one opponent enters
-               gauntlet mode: probe engine is matched against each opponent in turn, with
-               a summary table printed at the end (Opponent | Games | W | D | L | Score% | Elo diff).
-               --pgn FILE: persistent PGN to which all games from all opponents/iterations
-               are appended (-pgnout FILE append to cutechess-cli).
-               --pgn-out FILE: per-iteration PGN base name (unchanged semantics, renamed
-               from old -pgn short form).
-               Output is streamed line-by-line via Popen; Score and Elo difference lines
-               are parsed from cutechess-cli output in real time.  Elo is computed from
-               aggregate W/D/L across iterations when -i > 1.
-               training_run.py updated to use --pgn-out (was -pgn).
-             -- tdleaf_selfplay.py: engine name resolution now prefers CWD over the
-               script directory, so the script works correctly when invoked from
-               learn/ or other directories without resolving engines to run/.
-             -- Fixed .tdleaf.bin save path to use exec_dir (same as load path),
-               preventing saves landing in the wrong directory when launched via
-               cutechess-cli or other GUIs.  Also fixed exec_path parse loop limit.
-             -- Added learn/ directory for training runs; symlinks to comp.pl and
-               tdleaf_selfplay.py.
-             -- Archived unused src/ files (MinGW/old release build scripts, FLTK
-               GUI source) to archives/src/.
-             -- Added docs/NNUE.md and docs/TDLEAF.md as implementation references.
-2026_03_09 -- Reorganised repository: all Python scripts moved to scripts/ at repo root.
-               run/ and learn/ retain symlinks to scripts/ for in-place invocation.
-               compare_fc_weights.py renamed to compare_nnue_learning.py.
-               tdleaf_selfplay.py kept in scripts/ with no symlinks (not in active use).
-               docs/ created at repo root; holds NNUE.md, TDLEAF.md, TODO.md,
-               change_log.txt, license.txt (moved from src/).
-
-2026_03_11 -- Removed TRAIN_EVAL compile flag (dead code from legacy eval training era).
-               All TRAIN_EVAL-guarded blocks removed from score.cpp, search.cpp (qsearch),
-               main.cpp, game_rec.cpp (train_eval and build_fen_list functions deleted),
-               chess.h, and define.h.  No functionality lost; all affected paths had been
-               disabled or superseded by NNUE.
-             -- Added MATERIAL_ONLY compile flag (define.h, score.cpp).
-               When MATERIAL_ONLY=1, score_pos() returns the raw material balance
-               immediately without NNUE or classical eval.  Useful as a training baseline.
-               Build: perl comp.pl <vers> NNUE=1 MATERIAL_ONLY=1
-             -- Fixed Linux GCC warnings: bare fread() calls in nnue.cpp (read_u32 and
-               nnue_write_nnue header-copy block) cast to (void) to suppress
-               -Wunused-result; dummy2[] buffer in support.cpp widened from 2 to 4 bytes
-               to suppress -Wformat-truncation.  Code was functional; warnings only.
-
-2026_03_11 -- TDLeaf horizon noise mitigation: two new mechanisms to reduce the
-               influence of tactics beyond the search horizon on gradient updates.
-
-               Approach 1 — TD error clipping (TDLEAF_SCORE_CLIP_CP = 200 cp):
-               When the white-POV score change between consecutive moves exceeds the
-               threshold, the (d[t+1]-d[t]) contribution to the eligibility trace is
-               scaled down proportionally so the effective change is capped.  Direction
-               of the update is preserved; only the magnitude is reduced.
-
-               Approach 2 — ID score stability weighting (TDLEAF_ID_VAR_SIGMA2 = 10000 cp²):
-               The last TD_ID_HIST=4 iterative-deepening scores are tracked in
-               tree_search::id_scores[]/id_score_count (chess.h, search.cpp).  Their
-               variance is recorded in TDRecord::id_score_variance.  The gradient scale
-               at each ply is multiplied by 1/(1 + variance/TDLEAF_ID_VAR_SIGMA2),
-               down-weighting positions whose score fluctuated across search depths.
-
-               Both approaches active simultaneously by default; each can be disabled by
-               setting its hyperparameter to a very large value.  See docs/TDLEAF.md
-               (Horizon Noise Mitigation section) and docs/TODO.md (ablation plan).
-
-2026_03_11 -- scripts/bayeselo_ratings.py: accept multiple PGN files on the command
-               line; each is fed to BayesElo as a separate readpgn command so all games
-               are combined before rating computation.
-
-             -- scripts/pgn_dedup.py (new): removes duplicate games from one or more
-               PGN files.  Identity is determined by normalising move text (stripping
-               move numbers, comments, NAG annotations, result tokens) and comparing
-               MD5 hashes.  Options: --output FILE, --report (per-duplicate detail +
-               summary to stderr), --players (include White/Black in identity key).
-
-             -- match.py, training_run.py: added per-engine depth limit options
-               (--depth1 N / --depth2 N), passed to cutechess-cli as depth=N in the
-               engine spec.  Useful for handicap matches and controlled-depth training.
-
-             -- docs/TRAINING.md (new): documents the first TDLeaf self-play training
-               run (nn-fresh-260309), test methodology, BayesElo results, and analysis.
-               Tablebases disabled during this run (wrong EGTB_PATH in search.par).
-               Fischer Random starting positions used throughout (no opening book).
-               PSQT initialised to pawn=100cp, knight=bishop=300cp, rook=500cp, queen=900cp.
+               can now share a single .tdleaf.bin safely via POSIX file locking and
+               delta-based merging.  Lock file: .tdleaf.bin.lock.  Atomic rename on write.
+             -- Added --init-nnue --write-nnue mode: creates a randomly initialised .nnue
+               from scratch using N(mean,std) from nn-ad9b42354671.nnue for FC layers,
+               N(-0.71,44.41) for FT weights, and piece-value priors for PSQT.
 
 -------------- old change log below -------------------
 
