@@ -14,6 +14,25 @@ PSQT in particular appears to learn very slowly — `NNUE_PSQT_LR_SCALE` raised 
 similarly benefit from empirical testing.  A short grid search varying each scale
 independently across 500–1000-game runs would establish good defaults.
 
+### Learning rate scales and delta clamping
+With symmetric self-play (both engines writing to the same `.tdleaf.bin`), the
+effective gradient signal per unit time doubles.  This may make the existing LR
+scales too aggressive, particularly for FC biases (`NNUE_FC_BIAS_LR_SCALE=5000`)
+and PSQT (`NNUE_PSQT_LR_SCALE=5000`) which already use large multipliers.  Also
+worth reviewing is `TDLEAF_MAX_UPDATE_FRAC` (currently 1.0, i.e. disabled) — a
+tighter per-update clamp (e.g. 0.10) could prevent large individual games from
+dominating the accumulated gradient, which matters more now that concurrent
+updates from both engines can compound within a single iteration.
+
+**Suggested investigation:**
+- Run a short symmetric training run and inspect the per-weight delta magnitudes
+  via `compare_nnue_learning.py` — watch for weights moving faster than
+  they did under asymmetric training.
+- If instability appears early, halve `TDLEAF_ALPHA` or tighten
+  `TDLEAF_MAX_UPDATE_FRAC` (start around 0.10–0.20) and re-run.
+- Consider whether separate scales for `_a`/`_b` make sense, or whether the
+  existing per-layer scales are sufficient to absorb the doubled signal.
+
 ### Epoch-based replay for TDLeaf training
 
 The current TDLeaf implementation is fully online: weights are updated after
