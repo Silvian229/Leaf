@@ -15,23 +15,19 @@ similarly benefit from empirical testing.  A short grid search varying each scal
 independently across 500–1000-game runs would establish good defaults.
 
 ### Learning rate scales and delta clamping
-With symmetric self-play (both engines writing to the same `.tdleaf.bin`), the
-effective gradient signal per unit time doubles.  This may make the existing LR
-scales too aggressive, particularly for FC biases (`NNUE_FC_BIAS_LR_SCALE=5000`)
-and PSQT (`NNUE_PSQT_LR_SCALE=5000`) which already use large multipliers.  Also
-worth reviewing is `TDLEAF_MAX_UPDATE_FRAC` (currently 1.0, i.e. disabled) — a
-tighter per-update clamp (e.g. 0.10) could prevent large individual games from
-dominating the accumulated gradient, which matters more now that concurrent
-updates from both engines can compound within a single iteration.
+`NNUE_PSQT_LR_SCALE` and `NNUE_FC_BIAS_LR_SCALE` have been dialled back from
+5000 → 1000 (2026-03-12) in preparation for symmetric self-play, where the
+effective gradient signal per unit time doubles.  `TDLEAF_REPLAY_K` was also
+reduced from 2 → 1 for the same reason.
 
-**Suggested investigation:**
-- Run a short symmetric training run and inspect the per-weight delta magnitudes
-  via `compare_nnue_learning.py` — watch for weights moving faster than
-  they did under asymmetric training.
-- If instability appears early, halve `TDLEAF_ALPHA` or tighten
-  `TDLEAF_MAX_UPDATE_FRAC` (start around 0.10–0.20) and re-run.
-- Consider whether separate scales for `_a`/`_b` make sense, or whether the
-  existing per-layer scales are sufficient to absorb the doubled signal.
+Still open:
+- `TDLEAF_MAX_UPDATE_FRAC` is currently 1.0 (disabled).  A tighter per-update
+  clamp (e.g. 0.10–0.20) could prevent large individual games from dominating
+  the accumulated gradient under concurrent two-engine training.
+- Run a symmetric training run and inspect delta magnitudes via
+  `compare_nnue_learning.py` (the new FC bias page is useful here) to confirm
+  the dialled-back scales are not still too aggressive.
+- If instability persists, consider halving `TDLEAF_ALPHA` next.
 
 ### Epoch-based replay for TDLeaf training
 
@@ -75,10 +71,12 @@ only the forward and backward NNUE passes at the fixed stored positions.
 | 3 | Slightly worse than K=2 |
 | 6 | Large regression |
 
-K=2 was marginally better than K=3 and substantially better than K=0.  K=6
+K=2 was marginally better than K=1 and substantially better than K=0.  K=6
 caused a large regression, consistent with the expected instability when stored
-positions become stale relative to the current network.  The default is set to
-K=2 in `src/define.h`.
+positions become stale relative to the current network.  The default has been
+reduced to K=1 in `src/define.h` as a more conservative choice for symmetric
+self-play, where the doubled gradient signal makes additional replay passes
+more likely to compound instability.
 
 ### Horizon noise mitigation — ablation testing plan
 

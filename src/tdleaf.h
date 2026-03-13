@@ -34,7 +34,7 @@ static const float NNUE_FT_LR_SCALE = 1.000f;
 //   With K=400 and cp_factor=100/5776, |grad_scale| ≈ 2e-4 for typical errors.
 //   PSQT weights are at int32 scale (a pawn ≈ 5776 units), so a large multiplier
 //   is needed to get meaningful per-game updates.
-static const float NNUE_PSQT_LR_SCALE = 5000.0f;
+static const float NNUE_PSQT_LR_SCALE = 1000.0f;
 // FT bias learning rate scale: applied to the FT bias gradient (g_acc[0][d] + g_acc[1][d]).
 // FT biases are shared across all positions so per-game cancellation is significant,
 // similar to FC biases. Start at 10× FT weight scale; tune empirically.
@@ -44,7 +44,7 @@ static const float NNUE_FT_BIAS_LR_SCALE = 10.0f;
 // Unlike weights, bias gradients have no l0_in[i] multiplier, so TDLeaf's
 // alternating wtm_sign × e[t] structure causes near-complete per-game cancellation.
 // A large multiplier is needed to produce visible int32 updates.  Tune empirically.
-static const float NNUE_FC_BIAS_LR_SCALE = 5000.0f;
+static const float NNUE_FC_BIAS_LR_SCALE = 1000.0f;
 //
 static const float TDLEAF_K               = 400.0f; // sigmoid temperature (centipawns)
 static const int   TDLEAF_MIN_PLIES       = 8;      // skip games shorter than this

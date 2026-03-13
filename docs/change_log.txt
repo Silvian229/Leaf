@@ -1,5 +1,14 @@
 Changes since 2017_12_24
 
+2026_03_12 -- TDLeaf: dial back LR scales and replay K for symmetric self-play.
+               NNUE_PSQT_LR_SCALE:    5000 → 1000  (tdleaf.h)
+               NNUE_FC_BIAS_LR_SCALE: 5000 → 1000  (tdleaf.h)
+               TDLEAF_REPLAY_K:          2 → 1     (define.h)
+               Both LR scales were raised 1000→5000 in the previous commit; dialled
+               back in anticipation of symmetric self-play doubling the gradient
+               signal per unit time.  K=1 is nearly as strong as K=2 (initial
+               ablation) and is more conservative under the higher gradient volume.
+
 2026_03_12 -- TDLeaf: skip learning on time-forfeit games (main.cpp).
                The xboard "result" command handler now reads the full result line
                including the {description} field.  If the description contains the

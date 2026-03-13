@@ -90,7 +90,7 @@
 // Score_stm is refreshed from stored accumulators against current weights each
 // pass.  Set TDLEAF_REPLAY_K=0 to disable; preserves exact current behaviour.
 #ifndef TDLEAF_REPLAY_K
- #define TDLEAF_REPLAY_K    2   // replay passes per game (0 = disabled)
+ #define TDLEAF_REPLAY_K    1   // replay passes per game (0 = disabled)
 #endif
 #ifndef TDLEAF_REPLAY_BUF_N
  #define TDLEAF_REPLAY_BUF_N 8  // ring buffer capacity (~4.5 MB × N static BSS)

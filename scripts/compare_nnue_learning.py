@@ -862,6 +862,120 @@ def plot_ft_overview(orig, upd, ft_data, save):
     return fig
 
 
+def plot_fc_bias_overview(orig, upd, save):
+    """
+    Page N: FC bias distributions and deltas (int32).
+    3 rows (FC0, FC1, FC2) × 3 cols:
+      Col 0: stacked panels — top=baseline (blue), bottom=learned (red),
+             x-axis set by the wider of the two distributions so outliers
+             in either panel are never clipped.
+      Col 1: delta distribution histogram (learned − baseline).
+      Col 2: per-stack scatter of individual Δ values; with so few biases
+             per stack every point is visible so no outlier can hide in
+             an aggregate statistic.
+    """
+    from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+
+    nnue_name   = orig.get('_name', 'original .nnue')
+    tdleaf_name = upd.get('_name',  'updated .tdleaf.bin')
+    has_counts  = upd.get('_has_counts', False)
+
+    fig = plt.figure(figsize=(16, 11))
+    fig.suptitle(f'FC bias comparison (int32)\n'
+                 f'blue = {nnue_name}   red = {tdleaf_name}   orange = delta',
+                 fontsize=11)
+
+    gs = GridSpec(3, 3, figure=fig,
+                  hspace=0.55, wspace=0.35,
+                  top=0.88, bottom=0.06, left=0.07, right=0.97)
+
+    layers = [
+        ('FC0 biases (16/stack)', 'fc0_bias', 'fc0_bias_cnt', L0_SIZE),
+        ('FC1 biases (32/stack)', 'fc1_bias', 'fc1_bias_cnt', L1_SIZE),
+        ('FC2 bias  (1/stack)',   'fc2_bias', 'fc2_bias_cnt', 1),
+    ]
+    last_row = len(layers) - 1
+
+    rng = np.random.default_rng(0)   # deterministic jitter
+
+    for row, (layer_name, key, cnt_key, n_per_stack) in enumerate(layers):
+        all_orig = np.concatenate(orig[key]).astype(np.int64)
+        all_upd  = np.concatenate(upd[key]).astype(np.int64)
+        delta    = all_upd - all_orig
+
+        # --- col 0: stacked histograms, x-axis = max range of both ---
+        bmax   = max(abs(int(all_orig.min())), abs(int(all_orig.max())),
+                     abs(int(all_upd.min())),  abs(int(all_upd.max())), 1)
+        b_bins = np.linspace(-bmax * 1.05, bmax * 1.05, 60)
+
+        gs_inner = GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[row, 0], hspace=0.08)
+
+        ax_top = fig.add_subplot(gs_inner[0])
+        ax_top.hist(all_orig, bins=b_bins, color='steelblue', alpha=0.75, density=True)
+        ax_top.set_title(layer_name, fontsize=9, fontweight='bold')
+        ax_top.set_ylabel('density', fontsize=8)
+        ax_top.tick_params(labelbottom=False, labelsize=7)
+        ax_top.text(0.98, 0.90, nnue_name, transform=ax_top.transAxes,
+                    fontsize=7, ha='right', va='top', color='steelblue')
+
+        ax_bot = fig.add_subplot(gs_inner[1], sharex=ax_top)
+        ax_bot.hist(all_upd, bins=b_bins, color='lightcoral', alpha=0.75, density=True)
+        ax_bot.set_ylabel('density', fontsize=8)
+        ax_bot.tick_params(labelsize=7)
+        ax_bot.text(0.98, 0.90, tdleaf_name, transform=ax_bot.transAxes,
+                    fontsize=7, ha='right', va='top', color='firebrick')
+        if row == last_row:
+            ax_bot.set_xlabel('bias value (int32)', fontsize=8)
+
+        # --- col 1: delta distribution ---
+        ax1 = fig.add_subplot(gs[row, 1])
+        d_max  = max(abs(int(delta.min())), abs(int(delta.max())), 1)
+        d_bins = np.linspace(-d_max * 1.05, d_max * 1.05, min(60, 2 * d_max + 3))
+        n_nz   = int(np.sum(delta != 0))
+        ax1.hist(delta, bins=d_bins, color='coral', alpha=0.85)
+        ax1.set_title(f'{layer_name}\nΔ  ({n_nz}/{delta.size} changed)', fontsize=9)
+        ax1.set_ylabel('count', fontsize=8)
+        ax1.axvline(0, color='k', linewidth=0.9, linestyle='--')
+        ax1.tick_params(labelsize=7)
+        if row == last_row:
+            ax1.set_xlabel('Δ value (int32, learned − baseline)', fontsize=8)
+
+        # --- col 2: per-stack scatter of individual Δ values ---
+        ax2 = fig.add_subplot(gs[row, 2])
+        x_vals, y_vals = [], []
+        for s in range(N_STACKS):
+            d_s = upd[key][s].astype(np.int64) - orig[key][s].astype(np.int64)
+            n   = len(d_s)
+            # horizontal jitter so overlapping points are visible
+            jitter = rng.uniform(-0.25, 0.25, n) if n > 1 else np.zeros(1)
+            x_vals.append(np.full(n, s, dtype=float) + jitter)
+            y_vals.append(d_s)
+        ax2.scatter(np.concatenate(x_vals), np.concatenate(y_vals),
+                    s=18, alpha=0.70, color='coral', linewidths=0)
+        ax2.axhline(0, color='k', linewidth=0.8, linestyle='--')
+        ax2.set_xticks(np.arange(N_STACKS))
+        ax2.set_xticklabels([f'S{i}' for i in range(N_STACKS)], fontsize=7)
+        ax2.set_title(f'{layer_name}\nΔ per stack (each point = one bias)', fontsize=9)
+        ax2.set_ylabel('Δ (int32)', fontsize=8)
+        ax2.tick_params(labelsize=7)
+        # Annotate with update counts if available
+        if has_counts and cnt_key in upd:
+            cnts = np.concatenate(upd[cnt_key])
+            ever = int(np.sum(cnts > 0))
+            mx   = int(cnts.max())
+            ax2.text(0.02, 0.97,
+                     f'updated: {ever}/{cnts.size}  max cnt: {mx}',
+                     transform=ax2.transAxes, fontsize=7,
+                     va='top', ha='left', color='dimgray')
+        if row == last_row:
+            ax2.set_xlabel('stack', fontsize=8)
+
+    if save:
+        fig.savefig('fc_bias_compare_overview.png', dpi=150)
+        print("Saved fc_bias_compare_overview.png")
+    return fig
+
+
 def plot_psqt_overview(orig, upd, ft_data, save):
     """
     Page 3: PSQT weight distributions.
@@ -1122,6 +1236,7 @@ def main():
     print_summary(orig, upd, ft_data)
 
     plot_overview(orig, upd, args.save)
+    plot_fc_bias_overview(orig, upd, args.save)
     plot_ft_overview(orig, upd, ft_data, args.save)
     plot_psqt_overview(orig, upd, ft_data, args.save)
 

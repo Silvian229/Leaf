@@ -90,7 +90,7 @@ errors (unknown types, undeclared identifiers).  These are expected and can be i
 
 - After each search, `tdleaf_record_ply()` walks the PV to the leaf, snapshots the accumulator, active feature indices, and iterative-deepening score history.
 - After each game, `tdleaf_update_after_game()` computes backward TD errors (λ=0.7), applies score-change clipping (TDLEAF_SCORE_CLIP_CP=200 cp) and ID-stability weighting (TDLEAF_ID_VAR_SIGMA2=10,000 cp²), then backpropagates through FC/FT/PSQT layers.
-- `tdleaf_replay()` then runs `TDLEAF_REPLAY_K` (default 2) additional passes over the last `TDLEAF_REPLAY_BUF_N` (default 8) completed games stored in a ring buffer, refreshing scores from current weights before each pass.
+- `tdleaf_replay()` then runs `TDLEAF_REPLAY_K` (default 1) additional passes over the last `TDLEAF_REPLAY_BUF_N` (default 8) completed games stored in a ring buffer, refreshing scores from current weights before each pass.
 - Weights persist to `<net>.tdleaf.bin` (v4 format); POSIX file locking + delta merging allows concurrent multi-instance training.
 - `material` in `score.cpp` is **already STM (side-to-move) POV** — do not flip it.
 

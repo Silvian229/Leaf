@@ -45,7 +45,7 @@ change between consecutive moves exceeds `TDLEAF_SCORE_CLIP_CP` centipawns — s
 
 where `∇_w d_t = d_t * (1 - d_t) / K * ∇_w score_t`.
 
-Defaults: `λ = 0.7`, `K = 400`, `TDLEAF_ALPHA = 200` (FC+FT), `NNUE_FT_LR_SCALE = 1.0` (FT weights), `NNUE_FT_BIAS_LR_SCALE = 10.0` (FT biases), `NNUE_PSQT_LR_SCALE = 10000` (PSQT), `NNUE_FC_BIAS_LR_SCALE = 1000` (FC biases).
+Defaults: `λ = 0.7`, `K = 400`, `TDLEAF_ALPHA = 200` (FC+FT), `NNUE_FT_LR_SCALE = 1.0` (FT weights), `NNUE_FT_BIAS_LR_SCALE = 10.0` (FT biases), `NNUE_PSQT_LR_SCALE = 1000` (PSQT), `NNUE_FC_BIAS_LR_SCALE = 1000` (FC biases).
 
 **Key design choice:** `d_t` is computed from `nnue_evaluate()` (direct static eval of the
 PV leaf), not from the search score propagated from the root.  This ensures the sigmoid
@@ -163,7 +163,7 @@ FC2 output (positional)
   The backward chain naturally amplifies the gradient to a useful magnitude for int16 weights.
 
 - `NNUE_PSQT_LR_SCALE` multiplies `grad_scale × 0.5` for the PSQT update.
-  Needs a large value (~10,000) because PSQT bypasses the FC backward chain entirely —
+  Needs a large value because PSQT bypasses the FC backward chain entirely —
   `grad_scale = TDLEAF_ALPHA × e[t] × d(1−d)/K × cp_factor ≈ 2×10⁻⁴`, while PSQT
   weights are at int32 scale (~5,776 per pawn).  Without the amplification, per-game
   updates would be ~1/10,000 of a pawn.
@@ -347,7 +347,7 @@ perl comp.pl train_fresh_ro NNUE=1 NNUE_NET=nn-fresh.nnue TDLEAF=1 TDLEAF_READON
 ## Epoch-Based Replay
 
 After `tdleaf_update_after_game()` applies the live gradient pass, `tdleaf_replay()`
-runs `TDLEAF_REPLAY_K` (default 2) additional passes over the last `TDLEAF_REPLAY_BUF_N`
+runs `TDLEAF_REPLAY_K` (default 1) additional passes over the last `TDLEAF_REPLAY_BUF_N`
 (default 8) completed games stored in a static ring buffer.
 
 ### How it works (Flavor B)
@@ -374,7 +374,8 @@ Score-change clipping and ID-stability weighting apply identically in replay pas
 | K | Result |
 |---|--------|
 | 0 | Baseline — much weaker |
-| 2 | **Best — current default** |
+| 1 | **Current default — nearly as strong as K=2, more conservative** |
+| 2 | Marginally better than K=1 in initial ablation; reduced to K=1 for stability |
 | 3 | Slightly worse than K=2 |
 | 6 | Large regression |
 
@@ -382,7 +383,7 @@ Score-change clipping and ID-stability weighting apply identically in replay pas
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `TDLEAF_REPLAY_K` | 2 | Replay passes per game; 0 disables replay |
+| `TDLEAF_REPLAY_K` | 1 | Replay passes per game; 0 disables replay |
 | `TDLEAF_REPLAY_BUF_N` | 8 | Ring buffer capacity (~4.5 MB × N static BSS) |
 
 ---
