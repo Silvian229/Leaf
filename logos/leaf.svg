@@ -1,19 +1,40 @@
-<svg width="393" height="168" viewBox="0 0 393 168" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="360" height="128" viewBox="14 21 360 128" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&amp;family=Cinzel:wght@400&amp;display=swap');
     </style>
-    <linearGradient id="lineGrad" x1="0" y1="0" x2="393" y2="0" gradientUnits="userSpaceOnUse">
+
+    <pattern id="chess" x="0" y="0" width="84" height="84" patternUnits="userSpaceOnUse">
+      <rect width="84" height="84" fill="none"/>
+      <rect x="0"  y="0"  width="42" height="42" fill="#2d5c38" opacity="0.18"/>
+      <rect x="42" y="42" width="42" height="42" fill="#2d5c38" opacity="0.18"/>
+    </pattern>
+
+    <linearGradient id="chessFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="white" stop-opacity="0"/>
+      <stop offset="48%"  stop-color="white" stop-opacity="0"/>
+      <stop offset="76%"  stop-color="white" stop-opacity="0.5"/>
+      <stop offset="91%"  stop-color="white" stop-opacity="1"/>
+      <stop offset="100%" stop-color="white" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="chessMask">
+      <rect width="393" height="168" fill="url(#chessFade)"/>
+    </mask>
+
+    <linearGradient id="lineGrad" x1="14" y1="0" x2="374" y2="0" gradientUnits="userSpaceOnUse">
       <stop offset="0%"   stop-color="#2d5c38" stop-opacity="0"/>
-      <stop offset="35%"  stop-color="#2d5c38" stop-opacity="1"/>
-      <stop offset="65%"  stop-color="#2d5c38" stop-opacity="1"/>
+      <stop offset="25%"  stop-color="#2d5c38" stop-opacity="1"/>
+      <stop offset="75%"  stop-color="#2d5c38" stop-opacity="1"/>
       <stop offset="100%" stop-color="#2d5c38" stop-opacity="0"/>
     </linearGradient>
   </defs>
 
   <rect width="393" height="168" fill="#f5f0e8"/>
+  <rect width="393" height="168" fill="url(#chess)" mask="url(#chessMask)"/>
   <rect x="0.5" y="0.5" width="392" height="167" stroke="#d8d0bc" stroke-width="1" fill="none"/>
-  <rect x="0" y="166" width="393" height="2" fill="url(#lineGrad)"/>
+
+  <!-- Bottom accent line at bottom of cropped view -->
+  <rect x="14" y="147" width="360" height="2" fill="url(#lineGrad)"/>
 
   <g transform="translate(54, 52)">
     <path d="M32 6 C32 6, 52 18, 52 34 C52 46, 43 55, 32 58 C21 55, 12 46, 12 34 C12 18, 32 6, 32 6 Z"

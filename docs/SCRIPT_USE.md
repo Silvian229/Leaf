@@ -87,13 +87,16 @@ cd learn/
 python3 compare_nnue_learning.py nn-fresh-260309.nnue nn-fresh-260309.tdleaf.bin
 ```
 
-Produces a three-page matplotlib figure:
+Produces a four-page matplotlib figure:
 
-- **Page 1 — FC layers**: FC0/FC1/FC2 weight and bias distributions (baseline vs
-  learned), per-output delta histograms, update count histograms
-- **Page 2 — Feature transformer**: FT bias distributions (baseline vs learned, v4
+- **Page 1 — FC weights**: FC0/FC1/FC2 weight distributions (baseline vs learned),
+  per-output delta histograms, per-stack % changed + max |Δ|
+- **Page 2 — FC biases**: FC0/FC1/FC2 bias distributions (baseline vs learned, int32),
+  delta histograms, per-stack scatter of individual Δ values (every bias visible so
+  no outlier can hide in an aggregate)
+- **Page 3 — Feature transformer**: FT bias distributions (baseline vs learned, v4
   `.tdleaf.bin` only), FT weight distributions, delta and update counts
-- **Page 3 — PSQT**: baseline vs learned distributions, delta histogram,
+- **Page 4 — PSQT**: baseline vs learned distributions, delta histogram,
   per-bucket mean delta bar chart ±1σ
 
 Optional flags:
