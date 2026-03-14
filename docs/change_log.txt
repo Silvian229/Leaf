@@ -1,5 +1,18 @@
 Changes since 2017_12_24
 
+2026_03_14 -- Time management: buffer for small-increment time controls (search.h, search.cpp, main.cpp).
+               Prevents time forfeits at fast controls with increment < 0.1 seconds.
+               Three changes:
+               (1) search.h: added MOVE_OVERHEAD_CS = 2 (centiseconds).  Tunable
+                   constant for per-move interface/OS overhead, analogous to EXTEND_TIME_SCORE.
+               (2) search.cpp: min_cushion floored at 3 cs (was 0 for base=0 games);
+                   max_margin floored at 3*min_cushion so the short-time-control
+                   activation threshold is non-zero for increment-only time controls.
+               (3) main.cpp: when inc > 0 and inc < 0.10 s, MOVE_OVERHEAD_CS is
+                   subtracted from time_limit before each search (clamped to MIN 1 cs).
+                   For 0+0.05 this reduces a typical 5 cs budget to 3 cs, leaving
+                   ~20 ms headroom for the interface round-trip per move.
+
 2026_03_12 -- TDLeaf: dial back LR scales and replay K for symmetric self-play.
                NNUE_PSQT_LR_SCALE:    5000 → 1000  (tdleaf.h)
                NNUE_FC_BIAS_LR_SCALE: 5000 → 1000  (tdleaf.h)

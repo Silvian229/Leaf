@@ -522,6 +522,11 @@ void make_move()
        */
        // Use no more than half of the time left
        time_limit = MIN(time_limit, game.timeleft[game.pos.wtm]/2);
+       // Reserve a fixed overhead buffer for small-increment time controls
+       // to account for interface latency and OS scheduling jitter per move
+       if(game.inc > 0.0f && game.inc < 0.10f) {
+         time_limit = MAX(1, time_limit - game.ts.MOVE_OVERHEAD_CS);
+       }
      } else {
        time_limit = game.timeleft[game.pos.wtm];
      }

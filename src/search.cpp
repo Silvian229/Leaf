@@ -324,9 +324,9 @@ move tree_search::search(position p, int time_limit, int T, game_rec *gr)
   //  Minimum time cushion is the smaller of 6 seconds or gr->base/100, but 
   //  it can be larger depending on lag and moves to go until time control.  
   //  NOTE: gr->base is in seconds, all times below are in centi-seconds
-  int min_cushion = MIN(gr->base, 600); 
-  int time_cushion = MAX((gr->mttc+3)*average_lag, min_cushion); 
-  int max_margin = MIN(gr->base*10, 6000);  
+  int min_cushion = MAX(MIN((int)gr->base, 600), 3);  // at least 3 cs for increment-only games
+  int time_cushion = MAX((gr->mttc+3)*average_lag, min_cushion);
+  int max_margin = MAX(MIN((int)gr->base*10, 6000), 3*min_cushion);  // non-zero for increment-only games
   if(xboard && gr->timeleft[p.wtm] <= MIN(3*time_cushion, max_margin)) {
     limit = MIN(limit, MAX(1,gr->timeleft[p.wtm]-2*time_cushion));
     max_limit = limit;  // no time extensions in this mode
