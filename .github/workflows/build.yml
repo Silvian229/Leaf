@@ -1,0 +1,19 @@
+name: Build Leaf Engine
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Compile Leaf
+        run: g++ -O3 -mbmi2 -march=native *.cpp -o leaf_bmi2.exe
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: leaf_bmi2
+          path: leaf_bmi2.exe
