@@ -1,24 +1,23 @@
-name: Build Leaf Engine
+name: Build Leaf
 
-on: [push]
+on: [workflow_dispatch]
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-      - name: Install GCC
-        run: |
-          choco install mingw -y
-          refreshenv
+    - name: Install perl
+      run: sudo apt-get install -y perl g++
 
-      - name: Compile Leaf
-        run: g++ -O3 -mbmi2 -march=native *.cpp -o leaf_bmi2.exe
+    - name: Build engine
+      run: |
+        perl src/comp.pl online_build NNUE=1 TDLEAF=1
 
-      - name: Upload EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: leaf_bmi2
-          path: leaf_bmi2.exe
+    - name: Upload binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: Leaf-engine
+        path: run/
